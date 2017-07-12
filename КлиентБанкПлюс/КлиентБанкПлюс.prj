@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<Project Version="1">
+  <Options Caption="Клиент-БанкПлюс" Version="000" Author="Copyright (с) 2006 DIC+ O.F.S.T. 2011 ( ;) )" Code="0" SubCode="0" WebCode="0" WebSubCode="0" Frontal="True"/>
+  <Usage>
+    <Project Name="КлиентБанк"/>
+  </Usage>
+  <Groups>
+    <Group Name="Бланки" Type="Blanks" Disabled="False"/>
+    <Group Name="Классы" Type="Classes" Disabled="False"/>
+  </Groups>
+</Project>

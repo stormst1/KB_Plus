@@ -1,0 +1,1415 @@
+extends КлиентБанк.Документы.КлиентБанк.блТабл "";
+
+  Import СИС2 Classes ФункцииДокумента, СтроковыеФункции;
+  Import Базовый Classes Переменные;
+  Import КлиентБанк ;
+  Import Сис2 Classes ФункцииРТТИ;
+
+
+InClass Public
+  Date1    :Date;
+  Date2    :Date;
+  Status[] :String;  -- 0-новая,1-уже показывалась,2-уже загружена ..служ
+  ЛокРекв:Record;
+
+  func ЗагрузкаПоИНН(rec:базовый.данные.субъект;БезАдреса:integer=0):string;
+--PROC 2кнBAU_ПолучитьИНН_OnClick0(B: Button);
+ VAR sHTTPЗапрос        :String;
+ VAR sHTTPОтвет         :String;
+ VAR хHTTP              :Variant;
+ VAR iИНН               :Integer;
+ VAR n,i1,i2            :Integer;
+ VAR s,s1,sBuf          :String;
+ VAR lErr               :Logical;
+
+ VAR sИмя               : String;
+ VAR sАдрес             : String;
+ VAR sИНН               : String;
+ VAR sОГРН              : String;
+ VAR локНовый,ТекстHTTPОтвета : String;
+
+  with rec do
+    
+
+  iИНН=Length(ИНН);
+  IF Not iИНН In [10,12] THEN
+    result=result+" "+'Проверь ИНН';
+    Return;
+  END;
+
+  sHTTPЗапрос='https://focus.kontur.ru/search?query='+ИНН;
+  TRY
+    хHTTP = AutoObject.Create("WinHttp.WinHttpRequest.5.1");
+    хHTTP.open ("GET", sHTTPЗапрос, 0);
+    хHTTP.send();
+
+    IF хHTTP.Status=407                         -- 407 прокси требует авторизации; 200 - ответ получен
+    THEN
+    END;
+
+
+    sHTTPОтвет=хHTTP.responsetext();
+  EXCEPT lErr=True; END; -- Try
+
+  IF lErr=True THEN
+     result=result+" "+'Ошибка при обработке^MИ-нет запроса';
+    Return;
+  END;
+
+  IF 0<>Pos('Ничего не найдено по запросу',sHTTPОтвет) THEN     -- Почему-то срабатывает не всегда
+     result=result+" "+'Ничего не найдено по запросу';
+    Return;
+  END;
+
+  sИмя   ='';
+  sАдрес ='';
+  sОГРН  ='';
+
+  IF iИНН=10 THEN                               -- Юридическое лицр
+    IF ИНН>'' And КодПричины>''THEN
+      IF Substr(ИНН,1,4)<>Substr(КодПричины,1,4) THEN
+        result=result+" "+
+                          '^Mв ИНН и КПП НЕ совпадает код ИМНС'
+                          +'^MЕсли это многофилиальная организация, то'
+                          +'^Mпри продолжении будут получены реквизиты'
+                          +'^MОСНОВНОЙ организации';
+      END;
+    END;
+    s1='meta name="description" content="';
+    n=Length(s1);
+    i1=Pos(s1,sHTTPОтвет);
+    IF i1=0 THEN
+      result=result+" "+'Ничего не найдено по запросу';
+      Return;
+    END;
+    s=Substr(sHTTPОтвет,i1+n,999);
+    i2=Pos('Выписка',s)-1;
+    s=Substr(s,1,i2);
+    s=СИС2.СтроковыеФункции.ЗаменитьвСтроке(s,'&quot;','"');
+    s=СИС2.СтроковыеФункции.ЗаменитьвСтроке(s,' &ndash; информация о контрагенте:',';');
+
+-- Только если есть что изменять
+--    IF rec.State<>Record.Edited  THEN Template.BeginEdit;  END;         -- ПЕРЕД изменениями
+
+    Имя         =Trim(ExtractWord(s,1,';'));
+      АльтИмя     =Имя;
+      ИмяДляПФР   =Имя;
+    IF Match(ПолнИмя,'Индивидуальный предприниматель*') THEN ПолнИмя=''; END;   -- Если поменялся тип
+    IF Trim(ПолнИмя)=''    THEN ПолнИмя   =Имя; END;                            -- Если не заполнено
+    IF Trim(КраткоеИмя)='' THEN КраткоеИмя=Имя; END;                            -- Если не заполнено 25.01.2016
+
+  --  ЮрАдрес     =Trim(ExtractWord(s,4,';'));
+    ТекстHTTPОтвета = ПодСтр( sHTTPОтвет, Поз( "ОГРН",      sHTTPОтвет )+20);
+    ЮрАдрес =  if (Поз( "Выписка из ЕГРЮЛ",      ТекстHTTPОтвета )<>0, ПодСтр( ТекстHTTPОтвета, 1, Поз( "Выписка из ЕГРЮЛ",         ТекстHTTPОтвета )-3), "");
+
+    s1='meta name="keywords" content="';
+    n=Length(s1);
+    i1=Pos(s1,sHTTPОтвет);
+    s=Substr(sHTTPОтвет,i1+n,999);
+    i2=Pos('"',s)-1;
+    s=Substr(s,1,i2);
+    КодПричины  =Trim(ExtractWord(s,2,','));
+      s1=Substr(КодПричины,1,4);                                -- Новый код ГНИ
+      IF s1<>КодГНИ THEN                                        -- Если не совпадает с текущим
+        КодГНИ=s1;                                              -- Присваиваю новый
+        НаименованиеГНИ='';                                     -- Очищаю старое название
+      END;
+
+    ОГРН        =Trim(ExtractWord(s,3,','));
+    ОГРНИП      ='';
+    ОКПО        =Trim(ExtractWord(s,4,','));
+
+    Контрагент=True;            ТипКонтрагента=0;
+    ФизическоеЛицо=False;       ФизЛицо=Nil;
+      Фамилия    .Clear;
+      ИмяСубъекта.Clear;
+      Отчество   .Clear;
+      Инициалы   ='';
+             if безадреса=0 then
+                АдресПочтовый=ЮрАдрес;
+                Адрес  =ЮрАдрес;
+             end;
+              if ВКлассеЕстьПоле(rec.ClassType,"ИмяДляСортировки") then
+                локновый=Подстр(Имя,поз(" ",Имя)+1 ,Длина(Имя))+" "+подстр(Имя,1,поз(" ",Имя));
+                while поз("'",локновый)>0 do
+                     локновый=подстр(локновый,1,поз("'",локновый)-1)+подстр(локновый,поз("'",локновый)+1,255);
+                end;
+                while поз('"',локновый)>0 do
+                     локновый=подстр(локновый,1,поз('"',локновый)-1)+подстр(локновый,поз('"',локновый)+1,255);
+                end;
+                rec.SetField("ИмяДляСортировки",локновый);
+              fi;
+
+  End;
+
+  IF iИНН=12 THEN                                       -- Физическое лицо
+
+    sBuf=sHTTPОтвет;                                    -- Текущий - сначала полный
+    WHILE True DO
+
+      s1='marR12 js-subject-link';
+      i1=Pos(s1,sBuf);
+      IF i1=0 THEN Break;                                       -- НЕТ в списке
+      END;
+      sBuf=Substr(sBuf,i1+Length(s1),9999);                      -- Отбрасываю начало
+      i1=Pos('>',sBuf)+1;
+      sBuf=Substr(sBuf,i1,9999);
+
+      i1=Pos('</a>',sBuf)-1;
+      s=Substr(sBuf,1,i1);                                      -- Текущая строка для анализа
+      sBuf=Substr(sBuf,Length(s)+1,9999);                        -- Удаляю ее из буфера
+      s=СИС2.СтроковыеФункции.ЗаменитьвСтроке(s,'<b>','');
+      s=СИС2.СтроковыеФункции.ЗаменитьвСтроке(s,'</b>','');
+      s=СИС2.СтроковыеФункции.ЗаменитьвСтроке(s,'&quot;','"');
+      sИмя=s;
+
+      s1='noMargin darkgreen';
+      n=Length(s1)+2;
+      i1=Pos(s1,sBuf);
+      sBuf=Substr(sBuf,i1+n,9999);                               -- Отбрасываю начало
+      i1=Pos('</p>',sBuf)-1;
+      s=Substr(sBuf,1,i1);                                      -- Текущая строка для анализа
+      sBuf=Substr(sBuf,Length(s)+1,9999);                        -- Удаляю ее из буфера
+      sАдрес=s;
+
+      s1='ИНН:</span>&nbsp;';
+      n=Length(s1);
+      i1=Pos(s1,sBuf);
+      sBuf=Substr(sBuf,i1+n,9999);                               -- Отбрасываю начало
+      i1=Pos('</span>',sBuf)-1;
+      s=Substr(sBuf,1,i1);                                      -- Текущая строка для анализа
+      sBuf=Substr(sBuf,Length(s)+1,9999);                        -- Удаляю ее из буфера
+      s=СИС2.СтроковыеФункции.ЗаменитьвСтроке(s,'<b>','');
+      s=СИС2.СтроковыеФункции.ЗаменитьвСтроке(s,'</b>','');
+      sИНН=s;
+
+      s1='ОГРН:</span>&nbsp;';
+      n=Length(s1);
+      i1=Pos(s1,sBuf);
+      sBuf=Substr(sBuf,i1+n,9999);                               -- Отбрасываю начало
+      i1=Pos('span',sBuf)-3;
+      s=Substr(sBuf,1,i1);                                      -- Текущая строка для анализа
+      sBuf=Substr(sBuf,Length(s)+1,9999);                        -- Удаляю ее из буфера
+      sОГРН=s;
+
+      IF sИНН=ИНН THEN Break; END;                            -- НАШЕЛ
+    END; -- while
+
+    IF sИмя='' Or sИНН<>ИНН THEN
+      result=result+" "+'Ничего не найдено по запросу';
+      Return;
+    END;
+-- Теперь есть заполненный набор переменных
+--    IF rec.State<>Record.Edited  THEN Template.BeginEdit;  END; -- ПЕРЕД изменениями
+
+    Имя         =sИмя+' (ИП)';
+      АльтИмя   =Имя;
+      ИмяДляПФР =Имя;
+    IF Фамилия.Count=0 THEN                                             -- Если нет строк (новая запись)
+      Фамилия    [01.01.1900]=ExtractWord(Имя,1);
+      ИмяСубъекта[01.01.1900]=ExtractWord(Имя,2);
+      Отчество   [01.01.1900]=ExtractWord(Имя,3);
+      Инициалы   =ExtractWord(Имя,2)[1]+'.'+ExtractWord(Имя,3)[1]+'.';
+    END;
+
+    IF Not Match(ПолнИмя,'*'+s+'*') THEN ПолнИмя=''; END;               -- Если не соответствует, то очищаю
+    IF Trim(ПолнИмя)   ='' THEN ПолнИмя='Индивидуальный предприниматель '+sИмя; END;
+    IF Trim(КраткоеИмя)='' THEN КраткоеИмя='ИП '+sИмя; END;             -- 25.01.2016
+
+    IF ЮрАдрес=''                               -- Только если пустой
+    THEN ЮрАдрес=sАдрес;      -- В ответах для ИП адрес урезанный - без индекса и улицы и квартиры
+    ELSE result=result+" "+'ЮрАдрес не обновлён. Для получения нового (урезанный для ИП) - сотрите старый и повторите запрос';
+    END;
+
+    ОГРН  ='';
+    ОГРНИП=sОГРН;
+
+    Контрагент=True;            ТипКонтрагента=1;
+    ФизическоеЛицо=True;        ФизЛицо=rec;
+    КодПричины='';                                                      -- Нет КПП у ИП
+      КодГНИ='';
+      НаименованиеГНИ='';
+    IF ДатаРождения<01.01.1900 THEN ДатаРождения=01.01.1900; END;       -- Обхожу стандартную проверку
+    IF Пол=0 THEN Пол=1; END;                                           -- Обхожу стандартную проверку
+             if безадреса=0 then
+              АдресПочтовый=ЮрАдрес;
+              Адрес  =ЮрАдрес;
+             end;
+              if ВКлассеЕстьПоле(rec.ClassType,"ИмяДляСортировки") then
+                локновый=Подстр(Имя,поз(" ",Имя)+1 ,Длина(Имя))+" "+подстр(Имя,1,поз(" ",Имя));
+                while поз("'",локновый)>0 do
+                     локновый=подстр(локновый,1,поз("'",локновый)-1)+подстр(локновый,поз("'",локновый)+1,255);
+                end;
+                while поз('"',локновый)>0 do
+                     локновый=подстр(локновый,1,поз('"',локновый)-1)+подстр(локновый,поз('"',локновый)+1,255);
+                end;
+                rec.SetField("ИмяДляСортировки",локновый);
+              fi;
+
+  END;
+  end;
+  if result<>"" then
+      Message("result");
+  end;
+
+END; -- Proc
+
+
+InObject Private
+
+exportname:string;
+позиции:TemplateSection;
+zag_v:TemplateSection;
+
+ДАТА       []:Date;     -- Дата отправки                                      --
+НОМЕРБУМ   []:String;   -- Номер платежки, на бумажном документе              --
+О_БАНКИМЯ  []:String;   -- Название корреспондента                            --
+О_ИНН      []:String;   -- ИНН корреспондента                                 --
+О_КПП      []:String;   -- КПП корреспондента       ..                        --
+О_БАНК     []:String;   -- Название банка корреспондента                      --
+О_ГОРОД    []:String;   -- Город банка контрагента
+О_РСЧЕТ    []:String;   -- Р/с контрагента                                    --
+О_КСЧЕТ    []:String;   -- Кор/с контрагента                                  --
+О_БИК      []:String;   -- БИК банка корреспондента                           --
+П_БАНКИМЯ  []:String;   -- Название корреспондента                            --
+П_ИНН      []:String;   -- ИНН корреспондента                                 --
+П_КПП      []:String;   -- КПП корреспондента       ..                        --
+П_БАНК     []:String;   -- Название банка корреспондента                      --
+П_ГОРОД    []:String;   -- Город банка контрагента
+П_РСЧЕТ    []:String;   -- Р/с контрагента                                    --
+П_КСЧЕТ    []:String;   -- Кор/с контрагента                                  --
+П_БИК      []:String;   -- БИК банка корреспондента                           --
+Т          []:String;   -- Назначение платежа                                 --
+СУММА      []:Numeric;  -- Сумма                                              --
+--ДАТОПЕР    []:Date;     -- Дата проводки по банку                             --
+ДАТАД      []:Date;     -- Срок платежа                                       --
+ДАТАО      []:String;   -- Очередность платежа                                --
+ВИДПЛ      []:String;   -- Вид платежа                                        --
+ВИДОП      []:String;   -- Вид оплаты                                         --
+НАЗ        []:String;   -- Код назначения платежа
+П1         []:String;   -- Статус
+П2         []:String;   -- КБК
+П3         []:String;   -- ОКАТО
+П4         []:String;   -- Основания платежа
+П5         []:String;   -- Показатель налогового периода
+П6         []:String;   -- Показатель номера документа
+П7         []:String;   -- Показатель даты документа
+П8         []:String;   -- Показатель типа платежа
+-- для требования и аккредитива
+УСЛОПЛ     []:String;   -- Условия оплаты
+-- для акредитива
+ВИДАККР    []:String;   -- Вид аккредитива
+ПРЕДСТ     []:String;   -- Платеж по представлению
+ДОПУСЛ     []:String;   -- Дополнительные условия
+СЧПОСТ     []:String;   -- Номер сч.поставщика
+-- служебный тип
+ТИПДОК     []:string;  -- 0-платежка 1-требов 2-аккредитив 3-ордер           --
+UKEY       []:КлиентБанк.Банки.КлиентБанк;
+
+ShRecs:Integer;
+Переключатель2:Object;
+
+локКонтрагент    :Первичка.Справочники.редСубъект;
+локБанк_Счета    :Первичка.Справочники.редБанковскиеСчета;
+локБанк_Субъекта :Базовый.Справочники.Банк;
+локБанкСчета     :Базовый.Справочники.БанковскиеРеквизиты;
+
+  proc НовыеСчетПриНажатии(Sender :Button);
+  var vRecord :Базовый.Данные.Субъект;
+  var Q1 :Query;
+  var newk:logical;
+  var f,j,k:integer;
+  var контр:Базовый.Данные.Субъект;
+
+  for j = 1..Позиции.Count do
+    контр=Nil;
+    if (Status[j] in ["Новый счет"]) then
+       if UKEY[j]<>nil  then
+       if UKEY[j].реквп<>nil   then
+        if не UKEY[j].реквп.наше then
+            контр=UKEY[j].реквп;
+        end;
+       fi;
+       if контр=nil then
+         if UKEY[j].рекв<>nil   then
+          if не UKEY[j].рекв.наше then
+              контр=UKEY[j].рекв;
+          end;
+         fi;
+       end;
+       if не контр=nil then
+           if контр.инн=О_ИНН[j] then
+               НайтиБанк(О_БИК[j]);
+               локБанкСчета              = Базовый.Справочники.БанковскиеРеквизиты.Create;
+               локБанкСчета.Субъект      = контр;
+               локБанкСчета.БанкСубъекта = локБанк_Субъекта;
+               локБанкСчета.БАНКИМЯ=О_БАНКИМЯ[j];
+               локБанкСчета.РСчет=trim(О_РСЧЕТ[j]);
+               локБанкСчета.Валюта = ВернутьРоссийскийРубль;
+               локБанкСчета.Умолчание=True;
+               локБанкСчета.Имя=Базовый.Справочники.интБанковскиеРеквизиты.ИмяЗаписиПоУмолчанию(локБанкСчета);
+               локБанкСчета.post;
+               контр.ОснБанкРеквизиты=локБанкСчета;
+           иначе
+               НайтиБанк(П_БИК[j]);
+               локБанкСчета              = Базовый.Справочники.БанковскиеРеквизиты.Create;
+               локБанкСчета.Субъект      = контр;
+               локБанкСчета.БанкСубъекта = локБанк_Субъекта;
+               локБанкСчета.БАНКИМЯ=П_БАНКИМЯ[j];
+               локБанкСчета.РСчет=trim(П_РСЧЕТ[j]);
+               локБанкСчета.Валюта = ВернутьРоссийскийРубль;
+               локБанкСчета.Умолчание=True;
+               локБанкСчета.Имя=Базовый.Справочники.интБанковскиеРеквизиты.ИмяЗаписиПоУмолчанию(локБанкСчета);
+               локБанкСчета.post;
+               контр.ОснБанкРеквизиты=локБанкСчета;
+           end;
+       end;
+       end;
+    fi;
+  end;
+end;
+
+proc шаблон_ПриОткрытии(Create :Logical);
+  var Q : Query;
+  inherited шаблон_ПриОткрытии(Create);
+  рекв=КлиентБанк.Документы.КлиентБанк.блИмпорт.локрекв;
+  Переключатель2.State = true;
+  if date1<01.01.1900 or date2<01.01.1900 then
+     date1 = today;
+     date2 = today;
+     Q = Query.Create([КлиентБанк.Банки.КлиентБанк]);
+     Q.Order   = "ДАТА";
+     Q.Filter  = "ТекРекв="+str(Рекв)+" and ДАТА>01.01.1900";
+     Q.Select;
+     if Q.Count > 0 then
+        Q.First;
+        date1 = Q.current.ДАТА;
+     end;
+     Q.close;
+  end;
+  RefreshBD;
+end;
+
+func СтрокаСодержитТолькоЛатинскиеБуквы(aStr :String) :Integer;
+  var i, n :Integer;
+  var ЛатинБуква :Logical;
+
+  n = 0;
+  for i = 1..Length(aStr) do
+     ЛатинБуква = СимволМежду(up(substr(aStr,i,1)),'A','Z');
+     if ЛатинБуква then
+        n = n + 1;
+     end;
+  end;
+  return n;
+end;
+
+proc RefreshBD;
+  var Q,Q1,Q2,Q3 : Query;
+  var i, k:Integer;
+  var w,st,str1: string;
+  var esto,estp,nash,nash1,nash2,nash3,nash4:logical;
+  var newk,newk1,newk2:logical;
+  var R3,R4: integer;
+
+  Q = Query.Create([КлиентБанк.Банки.КлиентБанк]);
+  Q.Order   = "DocID";
+  Q.Filter  = 'ТекРекв='+str(Рекв);
+  Q.Select;
+  ShRecs=Q.count;
+  for i=1..ShRecs do
+    w = str(Q.current.ТипДок);
+    if w = "0" then
+       Позиции.InsertFrame(i);
+       ТипДок[i]="Платежное поручение";
+    end;
+    if w = "1" then
+       Позиции.InsertFrame(i);
+       ТипДок[i]="Платежное требование";
+    end;
+    if w = "2" then
+       Позиции.InsertFrame(i);
+       ТипДок   [i]="Заявление на аккредитив";
+    end;
+--    if w = "3" then
+--       Позиции.InsertFrame(i);
+--       ТипДок   [i]="Приходно-платежный ордер";
+--    end;
+    UKEY     [i]=Q.Current;
+
+    ДАТА     [i]=UKEY[i].ДАТА;
+    НОМЕРБУМ [i]=UKEY[i].НОМЕРБУМ;
+    О_БАНКИМЯ[i]=UKEY[i].О_БАНКИМЯ;
+    О_ИНН    [i]=UKEY[i].О_ИНН;
+    О_КПП    [i]=UKEY[i].О_КПП;
+    О_БАНК   [i]=UKEY[i].О_БАНК;
+    О_ГОРОД  [i]=UKEY[i].О_ГОРОД;
+    О_РСЧЕТ  [i]=UKEY[i].О_РСЧЕТ;
+    О_КСЧЕТ  [i]=UKEY[i].О_КСЧЕТ;
+    О_БИК    [i]=UKEY[i].О_БИК;
+    П_БАНКИМЯ[i]=trim(UKEY[i].П_БАНКИМЯ);
+    П_ИНН    [i]=UKEY[i].П_ИНН;
+    П_КПП    [i]=UKEY[i].П_КПП;
+    П_БАНК   [i]=UKEY[i].П_БАНК;
+    П_ГОРОД  [i]=UKEY[i].П_ГОРОД;
+    П_РСЧЕТ  [i]=UKEY[i].П_РСЧЕТ;
+    П_КСЧЕТ  [i]=UKEY[i].П_КСЧЕТ;
+    П_БИК    [i]=UKEY[i].П_БИК;
+
+    esto = false;
+    estp = false;
+    R3 = nil;
+    R4 = nil;
+    nash  = false;
+    nash1 = false;
+    nash2 = false;
+    nash3 = false;
+    nash4 = false;
+
+    Q1 = Query.Create([Базовый.Данные.Субъект]);
+    Q1.Order   = "НАШЕ-;DocID";
+    Q1.Filter  = 'контрагент и ИНН="'+UKEY[i].О_ИНН+'"';
+ --   Q1.Filter  = 'ИНН="'+UKEY[i].О_ИНН+'" и КодПричины="'+UKEY[i].О_КПП+'"';
+    Q1.Select;
+    newk2 = Q1.EOF; --Если в запросе 0 элементов, то свойство EOF равно TRUE
+    if newk2 then
+      Status[i]="Новый контрагент, новый счет";
+      esto = true;
+    else
+      nash3 = Q1.Current.НАШЕ;
+    end;
+    Q1.close;
+
+    Q1 = Query.Create([Базовый.Данные.Субъект]);
+    Q1.Order   = "DocID";
+--    Q1.Filter  = 'ИНН="'+UKEY[i].П_ИНН+'" и КодПричины="'+UKEY[i].П_КПП+'"';
+    Q1.Filter  = 'контрагент и ИНН="'+UKEY[i].П_ИНН+'"';
+    Q1.Select;
+    newk1 = Q1.EOF;
+    if newk1 then
+       Status[i]="Новый контрагент, новый счет";
+       estp = true;
+    else
+       if UKEY[i].П_ИНН = nil then
+          if Pos('"',UKEY[i].П_БАНКИМЯ)>0 then
+             st="'";
+          elsif Pos("'",UKEY[i].П_БАНКИМЯ)>0 then
+             st='"';
+          else
+             st='"';
+          end;
+          Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+          Q2.Order   = "DocID";
+          Q2.Filter  = 'РСчет="'+UKEY[i].П_РСчет+'" and БанкИмя='+MaskChar(UKEY[i].П_БАНКИМЯ,st);
+          Q2.Select;
+          newk1 = Q2.EOF;
+          if newk1 then
+             Q2.Close;
+             Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+             Q2.Order   = "DocID";
+             Q2.Filter  = 'РСчет="'+UKEY[i].П_РСчет+'" and БанкИмя='+MaskChar(trim(UKEY[i].П_БАНКИМЯ),st);
+             Q2.Select;
+             newk1 = Q2.EOF;
+             if newk1 then
+                Q2.close;
+                Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+                Q2.Order   = "DocID";
+                Q2.Filter  = 'РСчет="'+UKEY[i].П_РСчет+'" and Субъект.Имя='+MaskChar(trim(UKEY[i].П_БАНКИМЯ),st);
+                Q2.Select;
+                if Q2.EOF then
+                Q2.close;
+                Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+                Q2.Order   = "DocID";
+                Q2.Filter  = 'РСчет="'+UKEY[i].П_РСчет+'" ';
+                Q2.Select;
+                if Q2.EOF then
+                   k = СтрокаСодержитТолькоЛатинскиеБуквы(trim(UKEY[i].П_БАНКИМЯ));
+                   if k = 0 then
+                      Status[i]="Новый контрагент, новый счет";
+                      estp = true;
+                   elsif k > 1 then
+                      Status[i]="Иностранный контрагент";
+                      estp = true;
+                   end;
+                 end;
+              end;
+              end;
+              Q2.close;
+          end;
+       else
+         nash4 = Q1.Current.НАШЕ;
+       end;
+    end;
+    Q1.close;
+
+    if newk1 and newk2 then
+       Status[i]="Новый контрагент, новый счет";
+    end;
+    if esto = true and estp = true then
+      Status[i]="Документ не прошел проверку";
+    end;
+    if nash3 = false and nash4 = false then
+      Status[i]="Документ не прошел проверку";
+    end;
+
+    Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+    Q2.Order   = "DocID";
+    Q2.Filter  = 'РСчет="'+UKEY[i].О_РСчет+'"';
+    Q2.Select;
+    newk=Q2.EOF;
+
+    Q1 = Query.Create([Базовый.Данные.Субъект]);
+    Q1.Order   = "НАШЕ-;DocID";
+    Q1.Filter  = 'контрагент и ИНН="'+UKEY[i].О_ИНН+'"';
+
+    Q1.Select;
+    if Q1.count>0 then
+       R3 = Q1.Current.DocId;
+    else
+       R3 = nil;
+    end;
+    Q1.close;
+
+    Q1 = Query.Create([Базовый.Данные.Субъект]);
+    Q1.Order   = "DocID";
+    Q1.Filter  = 'DocID='+str(R3);
+    Q1.Select;
+    if Q1.count>0 then
+       nash = Q1.Current.НАШЕ;
+    end;
+    Q1.close;
+
+    if newk and  not nash then
+       if (not newk1) and (not newk2) then
+          Status[i]="Новый счет";
+       end;
+    end;
+    if newk and nash then
+        Status[i]="Документ не прошел проверку";
+        nash1 = false;
+    end;
+    Q2.close;
+
+    Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+    Q2.Order   = "DocID";
+    Q2.Filter  = 'РСчет="'+UKEY[i].П_РСчет+'"';
+    Q2.Select;
+    newk=Q2.EOF;
+
+    Q1 = Query.Create([Базовый.Данные.Субъект]);
+    Q1.Order   = "DocID";
+    Q1.Filter  = 'контрагент и ИНН="'+UKEY[i].П_ИНН+'" и КодПричины="'+UKEY[i].П_КПП+'"';
+--    Q1.Filter  = 'ИНН="'+UKEY[i].П_ИНН+'" ';
+    Q1.Select;
+    if Q1.EOF then
+       R4 = nil;
+    else
+       if UKEY[i].П_ИНН = nil then
+          Q1.Close;
+          if Pos('"',UKEY[i].П_БАНКИМЯ)>0 then
+             st="'";
+          elsif Pos("'",UKEY[i].П_БАНКИМЯ)>0 then
+             st='"';
+          else
+             st='"';
+          end;
+          Q1 = Query.Create([Базовый.Данные.Субъект]);
+          Q1.Order   = "DocID";
+          Q1.Filter  = "контрагент и ИМЯ=" + MaskChar(UKEY[i].П_БАНКИМЯ,st);
+          Q1.Select;
+          if Q1.EOF then
+             Q1.Close;
+             Q1 = Query.Create([Базовый.Данные.Субъект]);
+             Q1.Order   = "DocID";
+             Q1.Filter  = "контрагент и ИМЯ=" + MaskChar(trim(UKEY[i].П_БАНКИМЯ),st);
+             Q1.Select;
+             if Q1.EOF then
+                R4 = nil;
+             else
+                R4 = Q1.Current.DocId;
+             end;
+          end;
+       else
+         R4 = Q1.Current.DocId;
+       end;
+    end;
+    Q1.close;
+
+    Q1 = Query.Create([Базовый.Данные.Субъект]);
+    Q1.Order   = "DocID";
+    Q1.Filter  = 'DocID='+str(R4);
+    Q1.Select;
+    if Q1.count>0 then
+       nash2 = Q1.Current.НАШЕ;
+    end;
+    Q1.close;
+
+    if newk and not nash2 then
+       if (not newk1) and (not newk2) then
+          Status[i]="Новый счет";
+       end;
+    end;
+    if nash1 then
+       if newk and nash2 then
+          Status[i]="Документ не прошел проверку";
+       end;
+    end;
+    Q2.close;
+
+    Q1 = Query.Create([Базовый.Данные.Субъект]);
+    Q1.Order   = "DocID";
+    Q1.Filter  ='DocID='+str(Q.current.Рекв.DocId);
+    Q1.Select;
+    newk=Q1.EOF;
+    if newk then
+       Q1.close;
+       Q1 = Query.Create([Базовый.Данные.Субъект]);
+       Q1.Order   = "НАШЕ-;DocID";
+       Q1.Filter  = 'контрагент и ИНН="'+UKEY[i].О_ИНН+'"';
+       Q1.Select;
+       if О_ИНН[i]="" or Q1.EOF then
+          Q1.Close;
+          if Pos('"',UKEY[i].О_БАНКИМЯ)>0 then
+             st="'";
+          elsif Pos("'",UKEY[i].О_БАНКИМЯ)>0 then
+             st='"';
+          else
+             st='"';
+          end;
+          Q1 = Query.Create([Базовый.Данные.Субъект]);
+          Q1.Order   = "НАШЕ-;DocID";
+          Q1.Filter  = "контрагент и ИМЯ=" + MaskChar(UKEY[i].О_БАНКИМЯ,st);
+          Q1.Select;
+       end;
+    end;
+    if Q1.count>=1 then
+       if newk then
+          UKEY[i].Рекв=Q1.Current;
+       end;
+    else
+       k = СтрокаСодержитТолькоЛатинскиеБуквы(trim(UKEY[i].О_БАНКИМЯ));
+       if k = 0 then
+          UKEY[i].Рекв=nil;
+       elsif k > 1 then
+          Status[i]="Иностранный плательщик";
+       end;
+    end;
+    Q1.close;
+
+    Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+    Q2.Order   = "DocID";
+    Q2.Filter  = 'DocID='+str(Q.current.БАНК.DocId)+' and Субъект.Наше';
+    Q2.Select;
+    newk=Q2.EOF;
+    if newk then
+       Q2.close;
+       Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+       Q2.Order   = "DocID";
+       Q2.Filter  = 'РСчет="'+UKEY[i].О_РСчет+'"'+' and Субъект.Наше';
+       Q2.Select;
+    end;
+    if Q2.count>0 then
+       if newk then
+          UKEY[i].БАНК=Q2.Current;
+       end;
+    else
+       UKEY[i].БАНК=nil;
+    end;
+    Q2.close;
+
+    Q1 = Query.Create([Базовый.Данные.Субъект]);
+    Q1.Order   = "DocID";
+    Q1.Filter  ='DocID='+str(Q.current.РеквП.DocId);
+    Q1.Select;
+    if Pos('"',UKEY[i].П_БАНКИМЯ)>0 then
+       st="'";
+    elsif Pos("'",UKEY[i].П_БАНКИМЯ)>0 then
+       st='"';
+    else
+       st='"';
+    end;
+    newk=Q1.EOF;
+    if newk then
+       Q1.close;
+       Q1 = Query.Create([Базовый.Данные.Субъект]);
+        Q1.Order   = "DocID";
+        Q1.Filter  = 'контрагент и ИНН="'+UKEY[i].П_ИНН+'" и КодПричины="'+UKEY[i].П_КПП+'"';
+        Q1.Select;
+        if Q1.EOF then
+           Q1.Close;
+           Q1 = Query.Create([Базовый.Данные.Субъект]);
+           Q1.Order   = "DocID";
+           Q1.Filter  = 'контрагент и ИНН="'+UKEY[i].П_ИНН+'"';
+           Q1.Select;
+           if Q1.EOF then
+              Q1.Close;
+              Q1 = Query.Create([Базовый.Данные.Субъект]);
+              Q1.Order   = "DocID";
+              Q1.Filter  = "контрагент и ИМЯ=" + MaskChar(trim(UKEY[i].П_БАНКИМЯ),st);
+              Q1.Select;
+              if Q1.EOF then
+                 Q1.Close;
+                 Q1 = Query.Create([Базовый.Данные.Субъект]);
+                 Q1.Order   = "DocID";
+                 Q1.Filter  = "контрагент и ИМЯ=" + MaskChar(UKEY[i].П_БАНКИМЯ,st);
+                 Q1.Select;
+                 if Q1.EOF then
+                    Q1.Close;
+                    Q1 = Query.Create([Базовый.Данные.Субъект]);
+                    Q1.Order   = "DocID";
+                    Q1.Filter  = "контрагент и ИМЯ=" + MaskChar(trim(UKEY[i].П_БАНКИМЯ),st);
+                    Q1.Select;
+                 end;
+              end;
+           end;
+        end;
+        if П_ИНН[i]<>nil then
+          if Q1.count=0 then
+             UKEY[i].РеквП=nil;
+          elsif Q1.count>=1 then
+            if Q1.count>1 then
+                  trace("В картотеке Контрагенты нет " + UKEY[i].П_БАНКИМЯ+"." + chr(13)+
+                          "Проверьте имя в картотеке Контрагенты на соответствие имени контрагента из текстового файла:" + chr(13) +
+                          "возможно лишние пробелы, отсутствие пробелов, лишние символы и т.п." + chr(13) +
+                          "Для Юр.лиц: проверьте, не дублируются ли ИНН!" + chr(13) +
+                          ""+ chr(13) +
+                          "Банковская выписка будет сформирована некорректно!");
+            fi;
+            if newk then
+               UKEY[i].РеквП=Q1.Current; --.DocId;
+            end;
+          elsif Q1.count>1 then
+            -- 22.05.2008
+            --Т.к. контрагенты могут быть с одинаковыми ИНН,но с разными наименованиями,то проверяем на совпадении имени контрагента.
+            --(по просьбе дилеров:не формировались банковские выписки).
+            Q1.close;
+            Q1 = Query.Create([Базовый.Данные.Субъект]);
+            Q1.Order   = "DocID";
+            Q1.Filter  = "контрагент и ИМЯ=" + MaskChar(UKEY[i].П_БАНКИМЯ,st);
+            Q1.Select;
+            if Q1.EOF then
+               Q1.close;
+               Q1 = Query.Create([Базовый.Данные.Субъект]);
+               Q1.Order   = "DocID";
+               Q1.Filter  = "контрагент и Имя=" + MaskChar(trim(UKEY[i].П_БАНКИМЯ),st);
+               Q1.Select;
+               if Q1.EOF then
+                  trace("В картотеке Контрагенты нет " + UKEY[i].П_БАНКИМЯ+"." + chr(13)+
+                          "Проверьте имя в картотеке Контрагенты на соответствие имени контрагента из текстового файла:" + chr(13) +
+                          "возможно лишние пробелы, отсутствие пробелов, лишние символы и т.п." + chr(13) +
+                          "Для Юр.лиц: проверьте, не дублируются ли ИНН!" + chr(13) +
+                          ""+ chr(13) +
+                          "Банковская выписка будет сформирована некорректно!");
+                             Q1 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+                             Q1.Order   = "DocID";
+                             Q1.Filter  = "РСчет=" + MaskChar(trim(UKEY[i].П_РСЧЕТ),st);
+                             Q1.Select;
+                             if Q1.EOF then
+                                UKEY[i].РеквП=nil;
+                             else
+                                UKEY[i].РеквП=Q1.Current.Субъект; --.DocId;
+                             end;
+
+
+               else
+                  UKEY[i].РеквП=Q1.Current; --.DocId;
+               end;
+            else
+              UKEY[i].РеквП=Q1.Current; --.DocId;
+            end;
+          end;
+          Q1.close;
+       else
+         Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+         Q2.Order   = "DocID";
+         Q2.Filter  = 'РСчет="'+UKEY[i].П_РСчет+'" and БанкИмя=' + MaskChar(UKEY[i].П_БАНКИМЯ,st);
+         Q2.Select;
+         if Q2.EOF then
+            Q2.Close;
+            Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+            Q2.Order   = "DocID";
+            Q2.Filter  = 'РСчет="'+UKEY[i].П_РСчет+'" and БанкИмя=' + MaskChar(trim(UKEY[i].П_БАНКИМЯ),st);
+            Q2.Select;
+            if Q2.EOF then
+               Q2.Close;
+               Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+               Q2.Order   = "DocID";
+               Q2.Filter  = 'РСчет="'+UKEY[i].П_РСчет+'" and Субъект.Имя=' + MaskChar(trim(UKEY[i].П_БАНКИМЯ),st);
+               Q2.Select;
+               if Q2.EOF then
+                 UKEY[i].РеквП=nil;
+               else
+                 UKEY[i].РеквП=Q2.Current.Субъект;
+               end;
+            else
+              UKEY[i].РеквП=Q2.Current.Субъект;
+            end;
+            Q2.close;
+         end;
+       end;
+    end;
+
+    Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+    Q2.Order   = "DocID";
+    Q2.Filter  = 'DocID='+str(Q.current.БАНКП.DocId);
+    Q2.Select;
+    newk=Q2.EOF;
+    if newk then
+       Q2.close;
+       Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+       Q2.Order   = "DocID";
+       Q2.Filter  = 'РСчет="'+UKEY[i].П_РСчет+'"';
+       Q2.Select;
+    end;
+    if Q2.count>0 then
+       if newk then
+          UKEY[i].БАНКП=Q2.Current;
+       end;
+    else
+       UKEY[i].БАНКП=nil;
+    end;
+    Q2.close;
+    if UKEY[i].ТИПДОК=0 then
+       str1='(БАНКП='+str(UKEY[i].БАНКП)+') and '+
+            '(РЕКВП='+str(UKEY[i].РЕКВП)+') and '+
+            '(РЕКВ=' +str(UKEY[i].РЕКВ)+')  and '+
+            '(БАНК=' +str(UKEY[i].БАНК)+')  and '+
+            '(ДАТА=' +str(UKEY[i].ДАТА)+')  and '+
+            if(pos('"',UKEY[i].НОМЕРБУМ)>0,"(НОМЕРБУМ='"+str(UKEY[i].НОМЕРБУМ)+"') and ",'(НОМЕРБУМ="'+str(UKEY[i].НОМЕРБУМ)+'") and ')+
+            '(СУММА='+Str(UKEY[i].СУММА,2)+')';
+
+        Q3 = Query.Create([Первичка.Банки.Поруч]);
+        Q3.Order   = "НОМЕРБУМ";
+        Q3.Filter  = str1;
+        Q3.Select;
+        if Q3.count=1 then
+           UKEY[i].КС=Q3.Current.Цель;
+           UKEY[i].КСП=Q3.Current.Кре;
+--       ОАН[i]=GetFieldS(KRobl,1,"Призн"   );R2=PutFieldS(Robl,i,"ОАН",ОАН[i]);
+--       ДАН[i]=GetFieldS(KRobl,1,"Признаки");R2=PutFieldS(Robl,i,"ДАН",ДАН[i]);
+      end;
+      Q3.close;
+    end;
+
+    Т        [i]=UKEY[i].Т;
+    СУММА    [i]=UKEY[i].СУММА;
+    --ДАТОПЕР  [i]=UKEY[i].ДАТОПЕР;
+    ДАТАД    [i]=UKEY[i].ДАТАД;
+    ДАТАО    [i]=UKEY[i].ДАТАО;
+    ВИДПЛ    [i]=UKEY[i].ВИДПЛ;
+    ВИДОП    [i]=UKEY[i].ВИДОП;
+    НАЗ      [i]=UKEY[i].НАЗ;
+    П1       [i]=UKEY[i].П1;
+    П2       [i]=UKEY[i].П2;
+    П3       [i]=UKEY[i].П3;
+    П4       [i]=UKEY[i].П4;
+    П5       [i]=UKEY[i].П5;
+    П6       [i]=UKEY[i].П6;
+    П7       [i]=UKEY[i].П7;
+    П8       [i]=UKEY[i].П8;
+    УСЛОПЛ   [i]=UKEY[i].УСЛОПЛ;
+    ВИДАККР  [i]=UKEY[i].ВИДАККР;
+    ПРЕДСТ   [i]=UKEY[i].ПРЕДСТ;
+    ДОПУСЛ   [i]=UKEY[i].ДОПУСЛ;
+    СЧПОСТ   [i]=UKEY[i].СЧПОСТ;
+
+    Hint("Рассмотрен "+Str(i)+" из "+Str(ShRecs)+" документов");
+    Q.next;
+  end;
+end;
+
+Proc НайтиБанк(БИК:Строка);
+  var Q1 : Query;
+   VAR sHTTPЗапрос        :String;
+   VAR хHTTP              :Variant;
+   var РЕЗЗапроса:storage;
+   var ТекстЗапроса:String;
+
+    Q1 = Query.Create([Базовый.Справочники.Банк]);
+    Q1.Filter  = 'БИК="'+trim(БИК)+'"';
+    Q1.Select;
+    if Q1.Count>0 then
+        локБанк_Субъекта=Q1.Current;
+     иначе
+        try
+              sHTTPЗапрос='http://htmlweb.ru/service/api.php?bic='+БИК+'&json';
+              хHTTP = AutoObject.Create("Msxml2.XMLHTTP.6.0");
+              хHTTP.open ("GET", sHTTPЗапрос, False);
+              хHTTP.send;
+              ТекстЗапроса=хHTTP.responseText;
+              if поз("error",ТекстЗапроса)>0 then
+                 Message("По такому БИК нет банков!");
+              иначе
+              РЕЗЗапроса=Json.Parse(ТекстЗапроса);
+              локБанк_Субъекта=Базовый.Справочники.Банк.Create;
+              локБанк_Субъекта.Имя      =РЕЗЗапроса.Name;
+              локБанк_Субъекта.Город    =РЕЗЗапроса.city;
+              локБанк_Субъекта.БИК      =РЕЗЗапроса.bic;
+              локБанк_Субъекта.КСчет    =РЕЗЗапроса.ks;
+              локБанк_Субъекта.Телефон  =РЕЗЗапроса.Тел;
+              локБанк_Субъекта.Адрес    =РЕЗЗапроса.adress;
+              локБанк_Субъекта.Страна   ="Россия";
+              локБанк_Субъекта.post;
+             fi;
+          исключение
+          trace("не загружен БИК "+ БИК+": "+errortext);
+          конец;
+    end;
+  
+end;
+
+proc НовыйПлательщик(vRecord:Базовый.Данные.Субъект;i:Integer);
+
+   НайтиБанк(О_БИК[i]);
+
+   локКонтрагент                   = Первичка.Справочники.редСубъект.BlankFormCreateEx;
+   локКонтрагент.Record.Контрагент = True;
+   локКонтрагент.Record.GroupDoc   = vRecord;
+   локКонтрагент.Record.Имя        = О_БАНКИМЯ[i];
+   локКонтрагент.Record.ИНН        = trim(О_ИНН[i]);
+   ЗагрузкаПоИНН(локКонтрагент.Record);
+   локКонтрагент.Record.ПолнИмя    = О_БАНКИМЯ[i];
+   локКонтрагент.Record.КодПричины = trim(О_КПП[i]);
+   локКонтрагент.Record.Поставщик  = True;
+   локКонтрагент.Record.Покупатель = True;
+
+   локБанкСчета              = Базовый.Справочники.БанковскиеРеквизиты.Create;
+   локБанкСчета.Субъект      = локКонтрагент.Record;
+   локБанкСчета.БанкСубъекта = локБанк_Субъекта;
+   локБанкСчета.БАНКИМЯ=О_БАНКИМЯ[i];
+   локБанкСчета.РСчет=trim(О_РСЧЕТ[i]);
+   локБанкСчета.Валюта = ВернутьРоссийскийРубль;
+   локБанкСчета.Умолчание=True;
+   локБанкСчета.Имя=Базовый.Справочники.интБанковскиеРеквизиты.ИмяЗаписиПоУмолчанию(локБанкСчета);
+   локБанкСчета.post;
+   локКонтрагент.Record.ОснБанкРеквизиты=локБанкСчета;
+end;
+
+proc НовыйПолучатель(vRecord:Базовый.Данные.Субъект;i:Integer);
+   НайтиБанк(П_БИК[i]);
+
+   локКонтрагент = Первичка.Справочники.редСубъект.BlankFormCreateEx;
+   локКонтрагент.Record.Контрагент = True;
+   локКонтрагент.Record.GroupDoc = vRecord;
+   локКонтрагент.Record.Имя=П_БАНКИМЯ[i];
+   локКонтрагент.Record.ИНН=trim(П_ИНН[i]);
+   ЗагрузкаПоИНН(локКонтрагент.Record);
+   локКонтрагент.Record.ПолнИмя=П_БАНКИМЯ[i];
+   локКонтрагент.Record.КодПричины = trim(П_КПП[i]);
+   локКонтрагент.Record.Поставщик  = True;
+
+   локБанкСчета              = Базовый.Справочники.БанковскиеРеквизиты.Create;
+   локБанкСчета.Субъект      = локКонтрагент.Record;
+   локБанкСчета.БанкСубъекта = локБанк_Субъекта;
+   локБанкСчета.БАНКИМЯ=П_БАНКИМЯ[i];
+   локБанкСчета.РСчет=trim(П_РСЧЕТ[i]);
+   локБанкСчета.Валюта = ВернутьРоссийскийРубль;
+   локБанкСчета.Умолчание=True;
+   локБанкСчета.Имя=Базовый.Справочники.интБанковскиеРеквизиты.ИмяЗаписиПоУмолчанию(локБанкСчета);
+   локБанкСчета.post;
+   локКонтрагент.Record.ОснБанкРеквизиты=локБанкСчета;
+end;
+
+func FieldStatus_OnEnter(Cell :TemplateCell; Index :Integer;Action :Template.EnterTypes) :Logical;
+   var vRecord    :Базовый.Данные.Субъект;
+   var Q1,Q2 : Query;
+   var newk,newk1:logical;
+   var f :integer;
+
+   if not (Status[index] in ["Документ не прошел проверку", "Иностранный контрагент","Иностранный плательщик"]):
+     --Новый контрагент,новый счет Плательщик--
+     Q1 = Query.Create([Базовый.Данные.Субъект]);
+     Q1.Order   = "НАШЕ-;DocID";
+     Q1.Filter  ='контрагент и ИНН="'+О_ИНН[index]+'"';
+     Q1.Select;
+     newk=Q1.EOF;
+     if newk = true then
+        f = Вопрос("" , "Определить нового контрагента:", ["В корневую папку","В группу","Отмена"], itQuestion);
+        if f = 1 then
+           НовыйПлательщик(vRecord,index);
+        elsif f = 2 then
+           Сообщение("Выберите группу, в которую вы хотите поместить:" + ":^M"+О_БАНКИМЯ[index]);
+           if (Console.OpenCardfile('Справочники.картСубъект', vRecord,'Контрагент and IsGroup<>0', Window.ModalWindow)=cmOK) then
+           end;
+           if vRecord.IsGroup then
+              НовыйПлательщик(vRecord,index);
+           end;
+        elsif f = 3 then
+           Abort;
+        end;
+        локКонтрагент.ОбработкаДокументаПриСоздании;
+        локКонтрагент.ОбработкаДокументаПриЗаписи;
+        RecordPost(локКонтрагент.Record);
+        if локКонтрагент.ShowEx(локКонтрагент.Record, Window.ModalWindow)=cmCancel then
+          локБанкСчета.Delete;
+          локБанк_Субъекта.Delete;
+          локКонтрагент.Record.Delete;
+        end;
+     end;
+     Q1.close;
+     --Новый контрагент,новый счет Получатель--
+     Q1 = Query.Create([Базовый.Данные.Субъект]);
+     Q1.Order   = "DocID";
+     Q1.Filter  ='контрагент и ИНН="'+П_ИНН[index]+'"';
+     Q1.Select;
+     newk=Q1.EOF;
+     if newk or П_ИНН[index]=nil then
+       f = Вопрос("" , "Определить нового контрагента:", ["В корневую папку","В группу","Отмена"], itQuestion);
+       if f = 1 then
+          НовыйПолучатель(vRecord,index);
+       elsif f = 2 then
+          Сообщение("Выберите группу, в которую вы хотите поместить:" + ":^M"+П_БАНКИМЯ[index]);
+          if (Console.OpenCardfile('Справочники.картСубъект', vRecord,'Контрагент and IsGroup<>0', Window.ModalWindow)=cmOK) then
+          end;
+          if vRecord.IsGroup then
+             НовыйПолучатель(vRecord,index);
+          end;
+       elsif f = 3 then
+          Abort;
+       end;
+       локКонтрагент.ОбработкаДокументаПриСоздании;
+       локКонтрагент.ОбработкаДокументаПриЗаписи;
+       RecordPost(локКонтрагент.Record);
+       if локКонтрагент.ShowEx(локКонтрагент.Record, Window.ModalWindow)=cmCancel then
+          локБанкСчета.Delete;
+          локБанк_Субъекта.Delete;
+          локКонтрагент.Record.Delete;
+       end;
+     end;
+     Q1.close;
+     --Новый счет Плательщик--
+     Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+     Q2.Order   = "DocID";
+     Q2.Filter  ='РСЧЕТ="'+О_РСЧЕТ[index]+'"';
+     Q2.Select;
+     newk1=Q2.EOF;
+     if newk1 then
+       message(О_БАНКИМЯ[index] + "^M^Mимеет новый банковский счет:^M^M" + О_РСЧЕТ[index]+".");
+       Q1 = Query.Create([Базовый.Данные.Субъект]);
+       Q1.Order   = "НАШЕ-;DocID";
+       Q1.Filter  ='контрагент и ИНН="'+О_ИНН[index]+'"';
+       Q1.Select;
+       newk=Q1.EOF;
+       if not newk then
+
+          локБанк_Счета = Первичка.Справочники.редБанковскиеСчета.BlankFormCreateEx;
+          локБанк_Счета.Record.Субъект = Q1.current;
+
+          НайтиБанк(О_БИК[index]);
+          локБанкСчета              = Базовый.Справочники.БанковскиеРеквизиты.Create;
+          локБанкСчета              = локБанк_Счета.Record;
+          локБанкСчета.БанкСубъекта = локБанк_Субъекта;
+          локБанкСчета.БАНКИМЯ=О_БАНКИМЯ[index];
+          локБанкСчета.РСчет=trim(О_РСЧЕТ[index]);
+          локБанкСчета.Валюта = ВернутьРоссийскийРубль;
+          локБанкСчета.Умолчание=True;
+          локБанкСчета.Имя=Базовый.Справочники.интБанковскиеРеквизиты.ИмяЗаписиПоУмолчанию(локБанкСчета);
+          локБанкСчета.post;
+          локБанкСчета.Субъект.ОснБанкРеквизиты=локБанкСчета;
+
+       end;
+       if локБанк_Счета<>nil then
+          локБанк_Счета.ОбработкаДокументаПриСоздании;
+          if локБанк_Счета.ShowEx(локБанк_Счета.Record, Window.ModalWindow)=cmCancel then
+             локБанкСчета.Delete;
+             локБанк_Субъекта.Delete;
+          end;
+       end;
+       Q1.close;
+     end;
+     Q2.close;
+     --Новый счет Получатель--
+     Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+     Q2.Order   = "DocID";
+     Q2.Filter  ='РСЧЕТ="'+П_РСЧЕТ[index]+'"';
+     Q2.Select;
+     newk1=Q2.EOF;
+     if newk1 then
+       message(П_БАНКИМЯ[index] + "^M^Mимеет новый банковский счет:^M^M" + П_РСЧЕТ[index]+".");
+       Q1 = Query.Create([Базовый.Данные.Субъект]);
+       Q1.Order   = "DocID";
+      Q1.Filter  ='контрагент и ИНН="'+П_ИНН[index]+'"';
+       Q1.Select;
+       newk=Q1.EOF;
+       if not newk then
+          локБанк_Счета = Первичка.Справочники.редБанковскиеСчета.BlankFormCreateEx;
+          локБанк_Счета.Record.Субъект = Q1.current;
+          НайтиБанк(П_БИК[index]);
+
+
+          локБанкСчета              = Базовый.Справочники.БанковскиеРеквизиты.Create;
+          локБанкСчета   = локБанк_Счета.Record;
+          локБанкСчета.БанкСубъекта = локБанк_Субъекта;
+          локБанкСчета.БАНКИМЯ=П_БАНКИМЯ[index];
+          локБанкСчета.РСчет=trim(П_РСЧЕТ[index]);
+          локБанкСчета.Валюта = ВернутьРоссийскийРубль;
+          локБанкСчета.Умолчание=True;
+          локБанкСчета.Имя=Базовый.Справочники.интБанковскиеРеквизиты.ИмяЗаписиПоУмолчанию(локБанкСчета);
+          локБанкСчета.post;
+          локБанкСчета.Субъект.ОснБанкРеквизиты=локБанкСчета;
+       end;
+       if локБанк_Счета<>nil then
+         локБанк_Счета.ОбработкаДокументаПриСоздании;
+         if локБанк_Счета.ShowEx(локБанк_Счета.Record, Window.ModalWindow)=cmCancel then
+            локБанкСчета.Delete;
+            локБанк_Субъекта.Delete;
+         end;
+       end;
+       Q1.close;
+     end;
+     Q2.close;
+     --Новый БИК Плательщик--
+     Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+     Q2.Order   = "DocID";
+     Q2.Filter  ='БанкСубъекта.БИК="'+О_БИК[index]+'"';
+     Q2.Select;
+     newk1=Q2.EOF;
+     if newk1 then
+       message(О_БАНКИМЯ[index] + "^M^Mимеет новый БИК:^M^M" + О_БИК[index]+".");
+       Q1 = Query.Create([Базовый.Данные.Субъект]);
+       Q1.Order   = "НАШЕ-;DocID";
+       Q1.Filter  ='контрагент и ИНН="'+О_ИНН[index]+'"';
+       Q1.Select;
+       newk=Q1.EOF;
+       if not newk then
+          локБанк_Счета = Первичка.Справочники.редБанковскиеСчета.BlankFormCreateEx;
+          локБанк_Счета.Record.Субъект = Q1.current;
+          НайтиБанк(О_БИК[index]);
+
+
+          локБанкСчета              = Базовый.Справочники.БанковскиеРеквизиты.Create;
+          локБанкСчета   = локБанк_Счета.Record;
+          локБанкСчета.БанкСубъекта = локБанк_Субъекта;
+          локБанкСчета.БАНКИМЯ=О_БАНКИМЯ[index];
+          локБанкСчета.РСчет=trim(О_РСЧЕТ[index]);
+          локБанкСчета.Валюта = ВернутьРоссийскийРубль;
+          локБанкСчета.Умолчание=True;
+          локБанкСчета.Имя=Базовый.Справочники.интБанковскиеРеквизиты.ИмяЗаписиПоУмолчанию(локБанкСчета);
+          локБанкСчета.post;
+          локБанкСчета.Субъект.ОснБанкРеквизиты=локБанкСчета;
+       end;
+       if локБанк_Счета<>nil then
+         локБанк_Счета.ОбработкаДокументаПриСоздании;
+         if локБанк_Счета.ShowEx(локБанк_Счета.Record, Window.ModalWindow)=cmCancel then
+            локБанкСчета.Delete;
+            локБанк_Субъекта.Delete;
+         end;
+       end;
+       Q1.close;
+     end;
+     Q2.close;
+     --Новый БИК Получатель--
+     Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+     Q2.Order   = "DocID";
+     Q2.Filter  ='БанкСубъекта.БИК="'+П_БИК[index]+'"';
+     Q2.Select;
+     newk1=Q2.EOF;
+     if newk1 then
+       message(П_БАНКИМЯ[index] + "^M^Mимеет новый БИК:^M^M" + П_БИК[index]+".");
+       Q1 = Query.Create([Базовый.Данные.Субъект]);
+       Q1.Order   = "DocID";
+       Q1.Filter  ='контрагент и ИНН="'+П_ИНН[index]+'"';
+       Q1.Select;
+       newk=Q1.EOF;
+       if not newk then
+          локБанк_Счета = Первичка.Справочники.редБанковскиеСчета.BlankFormCreateEx;
+          локБанк_Счета.Record.Субъект = Q1.current;
+          НайтиБанк(П_БИК[index]);
+
+          локБанкСчета              = Базовый.Справочники.БанковскиеРеквизиты.Create;
+          локБанкСчета   = локБанк_Счета.Record;
+          локБанкСчета.БанкСубъекта = локБанк_Субъекта;
+          локБанкСчета.БАНКИМЯ=П_БАНКИМЯ[index];
+          локБанкСчета.РСчет=trim(П_РСЧЕТ[index]);
+          локБанкСчета.Валюта = ВернутьРоссийскийРубль;
+          локБанкСчета.Умолчание=True;
+          локБанкСчета.Имя=Базовый.Справочники.интБанковскиеРеквизиты.ИмяЗаписиПоУмолчанию(локБанкСчета);
+          локБанкСчета.post;
+          локБанкСчета.Субъект.ОснБанкРеквизиты=локБанкСчета;
+       end;
+       if локБанк_Счета<>nil then
+         локБанк_Счета.ОбработкаДокументаПриСоздании;
+         if локБанк_Счета.ShowEx(локБанк_Счета.Record, Window.ModalWindow)=cmCancel then
+            локБанкСчета.Delete;
+            локБанк_Субъекта.Delete;
+         end;
+       end;
+       Q1.close;
+     end;
+     Q2.close;
+   elsif Status[index] in ["Иностранный контрагент"]:
+    if (Console.OpenCardfile('Справочники.картКонтрагент', vRecord, '', Window.ModalWindow)=cmOK) then
+      if vRecord<>nil then
+         UKEY[index].РеквП = vRecord;
+         UKEY[index].П_БАНКИМЯ = vRecord.Имя;
+      end;
+    end;
+   elsif Status[index] in ["Иностранный плательщик"]:
+    if (Console.OpenCardfile('Справочники.картКонтрагент', vRecord, '', Window.ModalWindow)=cmOK) then
+      if vRecord<>nil then
+         UKEY[index].Рекв = vRecord;
+         UKEY[index].О_БАНКИМЯ = vRecord.Имя;
+      end;
+    end;
+   end;
+end;
+
+proc DatesRefresh(Sender :Button);
+  var i,j,n: Integer;
+  n = Позиции.Count;
+  for i=1..n do -- обратный цикл по кадрам
+      j = n +1 - i;
+      Позиции.DeleteFrame(j); -- удаляем его
+  end;
+
+ RefreshBD;
+end;
+
+proc Fielddate1_OnExit(Cell :TemplateCell; Index :Integer);
+  var i,j,n: Integer;
+  n = Позиции.Count;
+  for i=1..n do -- обратный цикл по кадрам
+      j = n +1 - i;
+      Позиции.DeleteFrame(j); -- удаляем его
+  end;
+
+ RefreshBD;
+end;
+
+proc Fielddate2_OnExit(Cell :TemplateCell; Index :Integer);
+  var i,j,n: Integer;
+  n = Позиции.Count;
+  for i=1..n do -- обратный цикл по кадрам
+      j = n +1 - i;
+      Позиции.DeleteFrame(j); -- удаляем его
+  end;
+
+ RefreshBD;
+end;
+
+proc Переключатель1_ПриИзменении(Sender :RadioButton);
+ var i:integer;
+ for i = 8..30 do
+   zag_v.Column[i].Visible=true;
+   Позиции.Column[i].Visible=true;
+ end;
+end;
+
+proc Переключатель2_ПриИзменении(Sender :RadioButton);
+ var i:integer;
+ for i = 8..30 do
+   zag_v.Column[i].Visible=false;
+   Позиции.Column[i].Visible=false;
+ end;
+end;
+
+proc НовыеКонтрагентыПриНажатии(Sender :Button);
+  var vRecord :Базовый.Данные.Субъект;
+  var Q1 :Query;
+  var newk:logical;
+  var f,j,k:integer;
+
+  k = 0;
+  for j = 1..Позиции.Count do
+    if (Status[j] in ["Новый контрагент, новый счет"]) then
+        k = k + 1;
+    end;
+  end;
+  if k > 0 then
+    f = Вопрос("" , "Определить новых контрагентов:", ["В корневую папку","В группу","Отмена"], itQuestion);
+    if f = 1 then
+       for j = 1..Позиции.Count do
+          if (Status[j] in ["Новый контрагент, новый счет"]) then
+             Q1 = Query.Create([Базовый.Данные.Субъект]);
+             Q1.Order   = "НАШЕ-;DocID";
+             Q1.Filter  ='контрагент и ИНН="'+О_ИНН[j]+'"';
+             Q1.Select;
+             newk=Q1.EOF;
+             if newk = true then
+                НовыйПлательщик(vRecord,j);
+                локКонтрагент.ОбработкаДокументаПриСоздании;
+                локКонтрагент.ОбработкаДокументаПриЗаписи;
+                RecordPost(локКонтрагент.Record);
+                if локКонтрагент.ShowEx(локКонтрагент.Record, Window.ModalWindow)=cmCancel then
+                   локБанкСчета.Delete;
+                   локБанк_Субъекта.Delete;
+                   локКонтрагент.Record.Delete;
+                end;
+             end;
+             Q1.close;
+             --Новый контрагент,новый счет Получатель--
+             Q1 = Query.Create([Базовый.Данные.Субъект]);
+             Q1.Order   = "DocID";
+             Q1.Filter  ='контрагент и ИНН="'+П_ИНН[j]+'"';
+             Q1.Select;
+             newk=Q1.EOF;
+             if newk then
+                НовыйПолучатель(vRecord,j);
+                локКонтрагент.ОбработкаДокументаПриСоздании;
+                локКонтрагент.ОбработкаДокументаПриЗаписи;
+                RecordPost(локКонтрагент.Record);
+                if локКонтрагент.ShowEx(локКонтрагент.Record, Window.ModalWindow)=cmCancel then
+                   локБанкСчета.Delete;
+                   локБанк_Субъекта.Delete;
+                   локКонтрагент.Record.Delete;
+                end;
+             end;
+             Q1.close;
+          end;
+       end;
+       Сообщение('Новые контрагенты добавлены в картотеку "Контрагенты"');
+    elsif f = 2 then
+       Сообщение("Выберите группу, в которую вы хотите поместить новых контрагентов");
+       if (Console.OpenCardfile('Справочники.картСубъект', vRecord,'Контрагент and IsGroup<>0', Window.ModalWindow)=cmOK) then
+       end;
+       if vRecord.IsGroup then
+          for j = 1..Позиции.Count do
+             if (Status[j] in ["Новый контрагент, новый счет"]) then
+                --Новый контрагент,новый счет Плательщик--
+                Q1 = Query.Create([Базовый.Данные.Субъект]);
+                Q1.Order   = "НАШЕ-;DocID";
+                Q1.Filter  ='контрагент и ИНН="'+О_ИНН[j]+'"';
+                Q1.Select;
+                newk=Q1.EOF;
+                if newk then
+                   НовыйПлательщик(vRecord,j);
+                   локКонтрагент.ОбработкаДокументаПриСоздании;
+                   локКонтрагент.ОбработкаДокументаПриЗаписи;
+                   RecordPost(локКонтрагент.Record);
+                   if локКонтрагент.ShowEx(локКонтрагент.Record, Window.ModalWindow)=cmCancel then
+                      локБанкСчета.Delete;
+                      локБанк_Субъекта.Delete;
+                      локКонтрагент.Record.Delete;
+                   end;
+                end;
+                Q1.close;
+                --Новый контрагент,новый счет Получатель--
+                Q1 = Query.Create([Базовый.Данные.Субъект]);
+                Q1.Order   = "DocID";
+                Q1.Filter  ='контрагент и ИНН="'+П_ИНН[j]+'"';
+                Q1.Select;
+                newk=Q1.EOF;
+                if newk then
+                   НовыйПолучатель(vRecord,j);
+                   локКонтрагент.ОбработкаДокументаПриСоздании;
+                   локКонтрагент.ОбработкаДокументаПриЗаписи;
+                   RecordPost(локКонтрагент.Record);
+                   if локКонтрагент.ShowEx(локКонтрагент.Record, Window.ModalWindow)=cmCancel then
+                      локБанкСчета.Delete;
+                      локБанк_Субъекта.Delete;
+                      локКонтрагент.Record.Delete;
+                   end;
+                end;
+                Q1.close;
+             end;
+          end;
+          Сообщение('Новые контрагенты добавлены в картотеку "Контрагенты"');
+       end;
+    elsif f = 3 then
+       Abort;
+    end;
+  end;
+end;
+
+
+end

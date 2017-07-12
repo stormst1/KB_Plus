@@ -1,0 +1,797 @@
+extends КлиентБанк.Документы.КлиентБанк.блЭкспорт "";
+
+  Import СИС2     Classes СтроковыеФункции;
+  Import Первичка Classes Функции;
+  Import Базовый  Classes Переменные;
+  Import КлиентБанк ;
+
+InClass Private
+
+  exportname     :String;
+  Правило        :String;
+  rschet         :String;
+
+InObject Private
+  date1          :Date;
+  date2          :Date;
+  dateform       :Date;
+  vFilter        :String;
+  stroka         :String;
+
+  var картПлатежныеПоручения    :TemplateCardFile;
+  var картПлатежныеТребования   :TemplateCardFile;
+  var картЗаявленияНаАккредитив :TemplateCardFile;
+
+  var строкаПлатПоручения       :TemplateRow;
+  var строкаПлатТребования      :TemplateRow;
+  var строкаАккредетив          :TemplateRow;
+
+  var клеткаНашеПредприятие     :TemplateCell = Template.CellByField["Рекв"];
+
+  var стрПустое                 :String = "-";
+
+
+  var Настройки :КлиентБанк.Документы.КлиентБанк.блЭкспНастр;
+  var Parameters:variant[];
+  var Parameters1:variant[2];
+  var Позиц : Integer;
+  var ПозицТ : Integer;
+  var ПозицА : Integer;
+  var ИмяРекв:Record;
+  var ln:integer;
+  var NameField :variant; --String;
+  var ТипПоляКарт:String;
+  var nach1:String;
+  var kon1:String;
+  var Обозначение:String;
+  var Обозначение1:String;
+  var Значение:string;
+  var zagr :Logical;
+  var fp2:TextFile;
+  var МассивСтр:String;
+  var n:integer;
+
+  proc НастроитьКартотеки;
+    var s,s1,vs,vs1,s3:String;
+    var i:integer;
+
+    s =if (date1>01.01.1900,"ДАТА>="+Str(date1),"");
+    s1=if (date2>01.01.1900,"ДАТА<="+Str(date2),"");
+    vs =if (date1>01.01.1900,"ДАТОПЕР>="+Str(date1),"");
+    vs1=if (date2>01.01.1900,"ДАТОПЕР<="+Str(date2),"");
+    s3="Рекв="+str(ТекущееНашеПредприятие);
+    for i = 1..self.Template.ObjectsCount do
+      if self.Template.Object[i].ClassName = "КартотекаШаблона" then
+        if self.Template.Object[i].Name='картПлатежныеПоручения' then
+          vFilter    = СложитьСтрокиФильтраПоИЛИ([s,s1]);
+          vFilter=СложитьСтрокиФильтраПоИЛИ([СложитьСтрокиФильтраПоИ([vs,vs1,s3]),(СложитьСтрокиФильтраПоИ(["ДАТОПЕР<"+str(01.01.1900),vFilter,s3]))]); --,СложитьСтрокиФильтраПоИ([vs,vs1,s3])]);
+          if rschet<>nil then
+            --vFilter = СложитьСтрокиФильтраПоИ([vFilter,'БАНК='+str(rschet)]);
+            vFilter = СложитьСтрокиФильтраПоИ([vFilter,'БАНК.РСчет="'+rschet+'"']);
+          end;
+          СтолбцыИзФормыКартотекиВКартотекуШаблона(Документы.КлиентБанк.картПлатежныеПорученияДляКлиентБанка,    картПлатежныеПоручения,    vFilter);
+        else
+          vFilter = СложитьСтрокиФильтраПоИ([s,s1,s3]);
+          if rschet<>nil then
+            --vFilter = СложитьСтрокиФильтраПоИ([vFilter,'БАНК='+str(rschet)]);
+            vFilter = СложитьСтрокиФильтраПоИ([vFilter,'БАНК.РСчет="'+rschet+'"']);
+          end;
+          СтолбцыИзФормыКартотекиВКартотекуШаблона(Документы.КлиентБанк.картПлатежныеТребованияДляКлиентБанка,   картПлатежныеТребования,   vFilter);
+          СтолбцыИзФормыКартотекиВКартотекуШаблона(Документы.КлиентБанк.картЗаявленияНаАккредитивДляКлиентБанка, картЗаявленияНаАккредитив, vFilter);
+        end;
+      end;
+    end;
+    НастроитьПозицииКартотек(nil, 0);
+  end;
+
+  proc НастроитьПозицииКартотек(Cell :TemplateCell; Index :Integer);
+    картПлатежныеПоручения.   Left = 0.5;
+    картПлатежныеПоручения.   Top  = строкаПлатПоручения. Top+строкаПлатПоручения. Height+0.5;
+
+    картПлатежныеТребования.  Left = 0.5;
+    картПлатежныеТребования.  Top  = строкаПлатТребования.Top+строкаПлатТребования.Height+0.5;
+
+    картЗаявленияНаАккредитив.Left = 0.5;
+    картЗаявленияНаАккредитив.Top  = строкаАккредетив.    Top+строкаАккредетив.    Height+0.5;
+  end;
+
+--  proc РасчетныйСчет;
+--    var Q       :Query;
+--    Q = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+--    Q.Filter = "Умолчание and Субъект="+str(ТекущееНашеПредприятие); --Рекв);
+--    Q.Select;
+--    if Q.Count >0 then
+--        rschet = Q.Current as Базовый.Справочники.БанковскиеРеквизиты;
+--    end;
+--  end;
+
+  proc шаблон_ПриОткрытии(Create: Logical);
+    inherited шаблон_ПриОткрытии(Create);
+    date1    = Today;
+    date2    = Today;
+    dateform = Today;
+    --РасчетныйСчет;
+    НастроитьКартотеки;
+  end;
+
+  proc шаблон_ПриПеремещении;
+    inherited шаблон_ПриПеремещении;
+    НастроитьПозицииКартотек(nil, 0);
+  end;
+
+  proc ПолеНаше_ПриВыходе(Cell :TemplateCell; Index :Integer);
+    inherited ПолеНаше_ПриВыходе(Cell, Index);
+    НастроитьПозицииКартотек(Cell, Index);
+  end;
+
+  func FieldExportName_OnLookup(Cell :TemplateCell; Value :String; var NewValue :String) :Logical;
+    if ChooseFile(NewValue, "Имя файла...", "Файлы выгрузки из Клиент-Банка(*.txt)|*.txt")=cmOK then
+    end;
+    Template.EndEdit;
+    Return(False);
+  end;
+
+  func ПолеПравилоПриВходе(Cell :TemplateCell; Index :Integer; Action :Template.EnterTypes) :Logical;
+    var vRecord    : КлиентБанк.Банки.ПравилоВыгрузки;
+
+    if Action<>2 then  -- Очистка
+       if (Console.OpenCardfile('Документы.КлиентБанк.картПравилоВыгрузки', vRecord,'Рекв='+str(Рекв) , Window.ModalWindow)=cmOK) then
+          if vRecord<>nil then
+             Правило  = vRecord.Путь;
+             rschet = vRecord.РСчет;
+             Template.EndEdit;
+          end;
+          НастроитьКартотеки;
+       end;
+      Return(False);
+    else
+      Return(true); -- Разрешаем войти в поле
+    end;
+  end;
+
+  proc Fielddate_OnExit(Cell :TemplateCell; Index :Integer);
+    НастроитьКартотеки;
+  end;
+
+--  func FieldrschetOnEnter(Cell :TemplateCell; Index :Integer;
+--                          Action :Template.EnterTypes) :Logical;
+--    var vRecord    : Базовый.Справочники.БанковскиеРеквизиты;
+
+--    if Action<>2 then  -- Очистка
+--       if (Console.OpenCardfile('Справочники.картБанковскиеСчета', vRecord,'Субъект='+str(Рекв) , Window.ModalWindow)=cmOK) then
+--          if vRecord<>nil then
+--             rschet = vRecord;
+--             НастроитьКартотеки;
+--             Template.EndEdit;
+--          end;
+--       end;
+--      Return(False);
+--    else
+--      Return(true); -- Разрешаем войти в поле
+--    end;
+--  end;
+
+--  proc FieldrschetOnExit(Cell :TemplateCell; Index :Integer);
+--    -- Обработка события выхода из редактируемого поля
+--    -- Параметры:
+--    --   Cell: клетка шаблона
+--    --   Index: номер кадра, в котором находится клетка
+--      НастроитьКартотеки;
+--  end;
+
+--  func ПолеПравило_ПриОбзоре(Cell :TemplateCell; Value :String; var NewValue :String) :Logical;
+--    if ChooseFile(Правило, "Имя файла...", "Файлы правил формирования выгрузки из Клиент-Банка(*.txt)|*.txt")=cmOK then
+--       proverka;
+--    end;
+--    Template.EndEdit(False);
+--    return true;
+--  end;
+
+proc proverka;
+  Документы.КлиентБанк.блЭкспНастр.ИмяЭкспорт = Правило;
+  Настройки = Документы.КлиентБанк.блЭкспНастр.Create;
+  Parameters = Настройки.P1; --ReadFromFile;
+  Parameters1 = Настройки.p2; --ReadFromFile1;
+  позиц=parameters[3];
+  позицТ=parameters[27];
+  ИмяРекв=parameters[35];
+  позицА=parameters[37];
+  zagr=true;
+  if (Рекв<>nil and Рекв<>Parameters[35] and ИмяРекв<>nil) then
+     message("Внимание!!!Вы пытаетесь взять настройки др.предприятия:"+ИмяРекв.Имя);
+     zagr=false;
+     Template.Field = "Правило";
+     return;
+  elsif (Рекв=nil and ИмяРекв<>nil) then
+     Рекв=имяРекв;
+     ТекущееНашеПредприятие=Рекв;
+  elsif ИмяРекв=nil then
+     message("Внимание!!!Вы пытаетесь взять настройки др.предприятия:"+Parameters[36]+"!"+
+             "В справочнике 'Контрагентов' нет контрагента:"+Parameters[36]+"!");
+     zagr=false;
+     return;
+  end;
+end;
+
+proc CloseBln(s:string);
+ Close;
+end;
+
+Func RZ(st:string):String;
+  var rez,st1,st2,st3,rzz:String;
+  var R,Dl,raz,j,l,II:Integer;
+  st1=trim(st);
+  l=ln; --[I];
+
+-- заменяет разделитель в датах
+  if ТипПоляКарт="Date":
+    if parameters[25] then --pointD :
+      while pos(".",st1)>0 do
+        st2=substr(st1,1,pos(".",st1)-1)+parameters[26]; --Razd1;
+        st3=st3+st2;
+        st1=substr(st1,pos(".",st1)+1,length(st1));
+      od;
+      st1=st3+st1;
+    fi;
+    R=Length(st1);
+    if ln=0: -- если не установлено количество символов
+      l=R;
+    fi;
+    if l>=R:
+      rez=substr(st1,1,R);
+    else
+      rez=substr(st1,1,l);
+    fi;
+  fi;---date
+
+  if ТипПоляКарт="String":
+    R=Length(st1);
+    if ln=0: -- если не установлено количество символов
+      l=R;
+    fi;
+    if l>=R:
+      rez=substr(st1,1,R);
+    else
+      rez=substr(st1,1,l);
+    fi;
+  fi;---string
+
+  if ТипПоляКарт="Logical":
+    R=Length(st1);
+    if ln=0: -- если не установлено количество символов
+      l=R;
+    fi;
+    if l>=R:
+      rez=substr(st1,1,R);
+    else
+      rez=substr(st1,1,l);
+    fi;
+  fi;---boolean
+
+-- убирает точку в сумме
+  --if ТипПоляКартотеки[i]="REAL" or ТипПоляКартотеки[i]="integer":
+  if ТипПоляКарт="Numeric" or ТипПоляКарт="Integer" then
+    if parameters[6] then --;pointS:
+      st2=substr(st1,1,pos(".",st1)-1);
+      st3=substr(st1,pos(".",st1)+1,2);
+      st1=st2+st3;
+    end;
+    R=Length(st1);
+    --if ln[I]=0: -- если не установлено количество символов
+    if ln=0 then -- если не установлено количество символов
+      l=R;
+    end;
+    if l>=R then
+      rez=substr(st1,1,R);
+    else
+      rez=substr(st1,1,l);
+    end;
+
+-- добавляет нули в начало суммы
+    if parameters[5] then --point0 then
+      R=Length(rez);
+      --if ln[I]=0 then -- если не установлено количество символов
+      if ln=0 then -- если не установлено количество символов
+        l=R;
+      end; --
+      if l>R then
+        raz=l-R;
+        for j=1..raz do
+          rzz="0"+rzz;
+        end;
+        rez=rzz+rez;
+      end;
+    end;
+  end;---real
+
+-- вставлять в начало строки
+  if parameters[7] then --pointna1 then
+    if rez<>"" then
+      rez=nach1+rez;
+    end;
+  end;
+
+-- вставлять в конец значения
+  if parameters[8] then --pointko1 then
+    if rez<>"" then
+      rez=rez+kon1;
+    end;
+  end;
+
+-- вставлять обозначения
+  if parameters[12] then --pointob1:
+     rez=Обозначение+if(Обозначение<>"",'=',"")+rez;
+  end;
+
+--вставлять значения
+  if parameters[13] then --pointob2:
+    rez=if(Значение<>nil,Replace(Значение,rez,поз("=",rez)+1),rez+Значение);
+    --rez=rez+Значение;
+  fi;
+
+-- вставлять имена полей и брать их значения в кавычки
+  if parameters[10] then --pointNM then
+    if rez<>"" then
+      rez=NameField+' "'+rez+'" ';
+    end;
+  end;
+
+-- запись значений в кавычки
+  if parameters[11] then --pointKV then
+    if rez<>"" then
+      rez=' "'+rez+'" ';
+    end;
+  end;
+
+-- установка заданного разделителя
+  if parameters[9] then --pointR then
+    if rez<>"" then
+      if parameters[1]<>"" then  --razd<>"" then
+        rez=parameters[1]+rez;
+      else
+        rez=parameters[1]+' '+rez;
+      end;
+    end;
+  end;
+
+-- дополнить пробелами
+  if parameters[14] then --pointPR1 then
+    Dl=LN-Длина(trim(rez));
+    if parameters[15] then --pointPR11 then
+       if parameters[16] then --pointC then
+          for II=1..Dl do
+            rez= parameters[2]+rez; --Razd2+rez;
+          end;
+       else
+          for II=1..Dl do
+            rez= ' '+rez;
+          end;
+       end;
+    else
+       if parameters[16] then --pointC then
+          for II=1..Dl do
+            rez= rez+parameters[2]; --Razd2;
+          end;
+       else
+          for II=1..Dl do
+            rez= rez+' ';
+          end;
+       end;
+    end;
+  end;
+  return rez;
+End;
+
+Func ПечатьНазначенияПлатежа(vSt:String):String;
+   var w,e,g,R,j:integer;
+   var s,s1,s2:String;
+   w = WordsCount(vSt," ");
+   r=Length(vSt);
+   e = 1;
+   s1="";
+   if r > 50 then
+     for j = 1..w do
+       s = ExtractWord(vSt,j," ");
+       s1 = s1 + " " + s;
+       g = Length(s1);
+       if g > 50 then
+         s2=rz(str(e)+ "=" + trim(s1));
+         fp2.WriteLn(Delete(s2,Pos("=",s2),1));
+         e = e + 1;
+         s1 = "";
+       end;
+     end;
+     if s1<>"" then
+        s2=rz(str(e)+ "=" + trim(s1));
+        fp2.WriteLn(Delete(s2,Pos("=",s2),1));
+     end;
+--енот+
+   else
+     s2=rz(str(e)+ "=" + trim(vSt));
+     fp2.WriteLn(Delete(s2,Pos("=",s2),1));
+--енот-
+   end;
+end;
+
+Func УдалитьИзМассива(аМассивСтрок[]:String):String;
+  var k:integer;
+  МассивСтр = str(аМассивСтрок);
+  k=pos(",",МассивСтр);
+  while k<>0 do
+     МассивСтр=Delete(МассивСтр,Pos(",",МассивСтр),1);
+     k=pos(",",МассивСтр);
+  end;
+  МассивСтр=delete(Delete(МассивСтр,Pos("]",МассивСтр),1),Pos("[",МассивСтр),1);
+end;
+
+Func КоличествоСтрок(l:integer;s:integer;Позиции:Integer):Integer;
+  n=0;
+  while not parameters1[l,s] and s<=Позиции do
+      s=s+1;
+      n=n+1;
+  end;
+end;
+
+proc Exportv(Sender :Button);
+  var ch,i,p,j,v :Integer;
+  var Дата       :Date;
+  var МассивСтрок:variant[];
+
+  if (SessionInfo.DemoMode) then
+    Message('Данный продукт работает в демонстрационном режиме..' + Chr(13) +
+            'При этом вводятся некоторые ограничения, в том числе:' + Chr(13) +
+            '- процедуры выгрузки данных в электронный формат в данном режиме заблокированы.' + Chr(13) +
+            'Кроме того, пользователи демонстрационной версии не обеспечиваются технической поддержкой.' + Chr(13) +
+            'Для регистрации данного продукта и приобретения лицензии свяжитесь с разработчиком программы - ' + Chr(13) +
+            'фирмой "ДИЦ" или ее дилерами.' + Chr(13) + Chr(13) +
+            'Контактная информация:' + Chr(13) +
+            '125057, Москва, Чапаевcкий пер.6, стр.1' + Chr(13) +
+            'Тел. (499) 157-03-15, 157-03-64' + Chr(13) +
+            'http://www.dic.ru');
+    Return;
+  end;
+
+  p  = 0;
+  j  = 0;
+  ch = 0;
+  with Query.Create([Банки.Поруч]) do
+    Order = "DocID";
+    Select;
+    ch = ch+Count;
+  end;
+  with Query.Create([Банки.Требов]) do
+    Order = "DocID";
+    Select;
+    ch = ch+Count;
+  end;
+  with Query.Create([Банки.ЗаявАккредитив]) do
+    Order = "DocID";
+    Select;
+    ch = ch+Count;
+  end;
+
+  if exportname="" then
+    Message('Укажите имя файла для выгрузки');
+    Template.Field="exportname";
+    return;
+  elsif Правило="" then
+    Message('Укажите имя файла правил для выгрузки');
+    Template.Field="Правило";
+    return;
+  elsif date1< 01.01.1900 then
+    Message("Укажите период, за который выгружаются документы");
+    Template.Field = "date1";
+    return;
+  elsif date2< 01.01.1900 then
+    Message("Укажите период, за который выгружаются документы");
+    Template.Field = "date2";
+    return;
+  elsif картПлатежныеПоручения.SelectedCount=0 and картПлатежныеТребования.SelectedCount=0 and картЗаявленияНаАккредитив.SelectedCount=0 then
+    Message("Выделите один из документов!");
+    return;
+  end;
+  proverka;
+ if zagr=true then
+    if ExistFile(if(WordInString("txt", exportname, "."),exportname,exportname+".txt")) then
+      if (EnqOkCancel('Файл "'+exportname+'" уже существует. Перезаписать файл?')= cmCancel) then
+         return;
+      end;
+    end;
+    try
+      if WordInString("txt", exportname, ".") then
+         if parameters[47] then
+            --DOS
+            fp2=TextFile.Create(exportname,fmCreate);
+         else
+            --Windows
+            fp2=TextFile.Create(exportname,fmCreate);
+         end;
+      else
+         if parameters[47] then
+            --DOS
+            fp2=TextFile.Create(exportname+".txt",fmCreate);
+         else
+            --Windows
+            fp2=TextFile.Create(exportname+".txt",fmCreate);
+         end;
+      end;
+      --разбивать на секции и писать заголовок
+      if parameters[4] then --pointob:
+        fp2.WriteLn(parameters[55]);                  -- ЗаголовокФайла
+        fp2.WriteLn("ВерсияФормата="+parameters[56]); -- ВерсияФормата
+        fp2.WriteLn("Кодировка="+if(parameters[47],"Dos","Windows"));
+        fp2.WriteLn("Отправитель="+parameters[57]);   -- Отправитель;
+        fp2.WriteLn("Получатель=" + parameters[58]);  -- банкпол;
+        fp2.WriteLn("ДатаСоздания="+Str(Дата));
+        fp2.WriteLn("ВремяСоздания=");
+        fp2.WriteLn("ДатаНачала="+Str(date1));
+        fp2.WriteLn("ДатаКонца="+Str(date2));
+        fp2.WriteLn("РасчСчет="+rschet);
+      end;
+
+      for v=1..картПлатежныеПоручения.SelectedCount do
+         if parameters[4] then --pointob:
+            fp2.WriteLn("СекцияДокумент=Платежное поручение");
+--енот--            fp2.WriteLn("Документ=Платежное поручение");
+         end;
+         --вставлять постоянное значение в начало и в конец каждого платежного поручения
+         if parameters[50] and parameters[51]<>nil then
+            fp2.WriteLn(parameters[51]);
+         end;
+         for i=1..Позиц do
+            NameField=parameters1[19,i]; --ИмяПоляКартотеки[i];
+            ln=parameters1[18,i];
+            ТипПоляКарт=parameters1[24,i];
+            nach1=parameters1[20,i];
+            kon1=parameters1[21,i];
+            Обозначение=parameters1[22,i];
+            Значение=parameters1[23,i];
+            try
+              stroka=if(ТипПоляКарт="Numeric" or ТипПоляКарт="Integer",str(картПлатежныеПоручения.Selected[v].getfield(NameField),2),
+                                                                     str(картПлатежныеПоручения.Selected[v].getfield(NameField)));
+            except
+              Message('В картотеке Платежных поручений нет поля '+NameField +' из Правила формирования экспорта!' + chr(13) +
+                      'Проверьте настройки экспорта!' + chr(13) + 
+                      'Возможно взяты настройки экспорта из версии 9.0.');
+              Raise;
+            end;
+            if (parameters[45]=0 and parameters1[46,i]) or parameters[45]=1 then
+               j=0;
+               fp2.WriteLn(rz(stroka));
+               if NameField='Т' then
+                  if parameters[54] then
+                     ПечатьНазначенияПлатежа(stroka);
+                  end;
+               end;
+            elsif (parameters[45]=0 and not parameters1[46,i]) or parameters[45]=2 then
+               j=j+1;
+               if j=1 then
+                  КоличествоСтрок(46,i,Позиц);
+               end;
+               МассивСтрок[j]=rz(stroka);
+               if n=j and LengthOfArray(МассивСтрок)>0 then
+                  УдалитьИзМассива(МассивСтрок);
+                  if parameters[45]=0 then
+                     --Несколько строк в одной или все в одной строке
+                     fp2.WriteLn(МассивСтр);
+                  elsif parameters[45]=2 then
+                     --обрезать строки по 256 символов
+                     fp2.WriteLn(substr(МассивСтр,1,255));
+                  end;
+                  МассивСтрок=nil;
+               end;
+            end;
+         end;
+         if parameters[50] and parameters[52]<>nil then
+            fp2.WriteLn(parameters[52]);
+         end;
+         if parameters[4] then --pointob:
+            fp2.WriteLn("КонецДокумента");
+         end;
+         if parameters[53] then
+            fp2.WriteLn(" ");
+         end;
+         p = p + 1;
+         Hint("Выгружено "+Str(p)+" из "+Str(ch)+" документов");
+      end;
+
+      for v=1..картПлатежныеТребования.SelectedCount do
+        while TRUE do -- эмулируем смещение в конец файла
+          fp2.ReadLn;
+          if fp2.EOF then -- если конец, обрываем цикл
+             break;
+          end;
+        end;
+        if parameters[4] then --pointob:
+           fp2.WriteLn("СекцияДокумент=Платежное требование");
+           fp2.WriteLn("Документ=Платежное требование");
+        end;
+        if parameters[50] and parameters[51]<>"" then
+           fp2.WriteLn(parameters[51]);
+        end;
+        for i=1..ПозицТ do
+          NameField=parameters1[28,i]; --ИмяПоляКартотеки[i];
+          ln=parameters1[29,i];
+          ТипПоляКарт=parameters1[30,i];
+          nach1=parameters1[31,i];
+          kon1=parameters1[32,i];
+          Обозначение=parameters1[33,i];
+          Значение=parameters1[34,i];
+          try
+            stroka=if(ТипПоляКарт="Numeric" or ТипПоляКарт="Integer",str(картПлатежныеТребования.selected[v].getfield(NameField),2),
+                                                                   str(картПлатежныеТребования.Selected[v].getfield(NameField)));
+          except
+            Message('В картотеке Платежных требований нет поля '+NameField +' из Правила формирования экспорта!' + chr(13)+
+                    'Проверьте настройки экспорта!' + chr(13) +
+                    'Возможно взяты настройки экспорта из версии 9.0.');
+            Raise;
+          end;
+          if (parameters[45]=0 and parameters1[48,i]) or parameters[45]=1 then
+              j=0;
+              fp2.WriteLn(rz(stroka));
+              if NameField='Т' then
+                 if parameters[54] then
+                    ПечатьНазначенияПлатежа(stroka);
+                 end;
+              end;
+          elsif (parameters[45]=0 and not parameters1[48,i]) or parameters[45]=2 then
+              j=j+1;
+              if j=1 then
+                 КоличествоСтрок(48,i,ПозицТ);
+              end;
+              МассивСтрок[j]=rz(stroka);
+              if n=j and LengthOfArray(МассивСтрок)>0 then
+                 УдалитьИзМассива(МассивСтрок);
+                 if parameters[45]=0 then
+                    --Несколько строк в одной или все в одной строке
+                    fp2.WriteLn(МассивСтр);
+                 elsif parameters[45]=2 then
+                    --обрезать строки по 256 символов
+                    fp2.WriteLn(substr(МассивСтр,1,255));
+                 end;
+                 МассивСтрок=nil;
+              end;
+          end;
+        end;
+        if parameters[50] and parameters[52]<>"" then
+           fp2.WriteLn(parameters[52]);
+        end;
+        if parameters[4] then --pointob:
+           fp2.WriteLn("КонецДокумента");
+        end;
+         if parameters[53] then
+            fp2.WriteLn(" ");
+         end;
+        p = p + 1;
+        Hint("Выгружено "+Str(p)+" из "+Str(ch)+" документов");
+       end;
+
+       for v=1..картЗаявленияНаАккредитив.SelectedCount do
+         while TRUE do -- эмулируем смещение в конец файла
+           fp2.ReadLn;
+           if fp2.EOF then -- если конец, обрываем цикл
+              break;
+           end;
+         end;
+         if parameters[4] then --pointob:
+            fp2.WriteLn("СекцияДокумент=Заявление на аккредитив");
+            fp2.WriteLn("Документ=Заявление на аккредитив");
+         end;
+         if parameters[50] and parameters[51]<>"" then
+           fp2.WriteLn(parameters[51]);
+         end;
+         for i=1..ПозицА do
+           NameField=parameters1[38,i]; --ИмяПоляКартотеки[i];
+           ln=parameters1[39,i];
+           ТипПоляКарт=parameters1[40,i];
+           nach1=parameters1[41,i];
+           kon1=parameters1[42,i];
+           Обозначение=parameters1[43,i];
+           Значение=parameters1[44,i];
+           try
+             stroka=if(ТипПоляКарт="Numeric" or ТипПоляКарт="Integer",str(картЗаявленияНаАккредитив.selected[v].getfield(NameField),2),
+                                                                    str(картЗаявленияНаАккредитив.Selected[v].getfield(NameField)));
+           except
+             Message('В картотеке Заявлений на аккредитив нет поля '+NameField +' из Правила формирования экспорта!' + chr(13) +
+                     'Проверьте настройки экспорта!' + chr(13) +
+                     'Возможно взяты настройки экспорта из версии 9.0.');
+             Raise;
+           end;
+           if (parameters[45]=0 and parameters1[49,i]) or parameters[45]=1 then
+               j=0;
+               fp2.WriteLn(rz(stroka));
+               if NameField='Т' then
+                  if parameters[54] then
+                     ПечатьНазначенияПлатежа(stroka);
+                  end;
+               end;
+           elsif (parameters[45]=0 and not parameters1[49,i]) or parameters[45]=2 then
+               j=j+1;
+               if j=1 then
+                  КоличествоСтрок(49,i,ПозицА);
+               end;
+               МассивСтрок[j]=rz(stroka);
+               if n=j and LengthOfArray(МассивСтрок)>0 then
+                  УдалитьИзМассива(МассивСтрок);
+                  if parameters[45]=0 then
+                     --Несколько строк в одной или все в одной строке
+                     fp2.WriteLn(МассивСтр);
+                  elsif parameters[45]=2 then
+                     --обрезать строки по 256 символов
+                     fp2.WriteLn(substr(МассивСтр,1,255));
+                  end;
+                  МассивСтрок=nil;
+               end;
+           end;
+         end;
+         if parameters[50] and parameters[52]<>"" then
+            fp2.WriteLn(parameters[52]);
+         end;
+         if parameters[4] then --pointob:
+            fp2.WriteLn("КонецДокумента");
+         end;
+         if parameters[53] then
+            fp2.WriteLn(" ");
+         end;
+         p = p + 1;
+         Hint("Выгружено "+Str(p)+" из "+Str(ch)+" документов");
+       end;
+
+       if parameters[4] then --pointob:
+          fp2.WriteLn("КонецФайла");
+       end;
+       fp2=nil;  --закрывает текстовый файл
+
+       if EnqOkCancel('Документы выгружены в текстовый файл'+Chr(13)+'Открыть его?')=cmOk then
+          if WordInString("txt", exportname, ".") then
+             OpenEditor(exportname);
+          else
+             OpenEditor(exportname + ".txt");
+          end;
+       end;
+     except
+--       Message('Не получается создать файл ' + exportname + chr(13)+
+--               'Возможные причины:' + chr(13) +
+--               '1.Файл уже существует и либо открыт на запись, либо доступен только для чтения;' + chr(13) +
+--               '2.Вы создаете файл в директории, куда не имеете права на запись;' + chr(13) +
+--               '3.Вы взяли настройки экспорта из версии 9.0.');
+      if ErrorCode = 21762 then
+         fp2=nil;  --закрывает текстовый файл
+         abort;
+      else
+        if (EnqOkCancel('Невозможно создать файл '+exportname+', т.к. он открыт в другом окне.' + chr(13) +
+                        'Закрыть файл?')<> cmCancel) then
+           CloseEditor(exportname);  --закрывает файл, открытый в другом окне
+           Exportv(Sender);
+        end;
+      end;
+    end;
+  end;
+end;
+
+proc Import(s1:button);
+   OpenBlank("Документы.КлиентБанк.блИмпорт");
+end;
+
+proc ВыделитьЗаписиПриНажатии(Sender :Button);
+     картПлатежныеПоручения.SelectRecords();
+     картПлатежныеТребования.SelectRecords();
+     картЗаявленияНаАккредитив.SelectRecords();
+end;
+
+proc СнятьВыделениеПриНажатии(Sender :Button);
+     картПлатежныеПоручения.DeselectRecords();
+     картПлатежныеТребования.DeselectRecords();
+     картЗаявленияНаАккредитив.DeselectRecords();
+end;
+
+proc OpenBankZUP(S: Button);
+  OpenBlank("ЦУП.ЦУП_Банк");
+end;
+
+func FieldexportnameOnOutput(Cell :TemplateCell; Value :Variant; Action :Template.OutputTypes; var Format :String) :Variant;
+  exportname = if(WordInString("txt", Value, "."),Value,Value+".txt");
+  Result = exportname; -- Что получили, то и выводим
+end;
+
+end

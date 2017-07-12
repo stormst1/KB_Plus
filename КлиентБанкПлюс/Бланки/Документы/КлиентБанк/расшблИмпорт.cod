@@ -1,0 +1,1128 @@
+extends КлиентБанк.Документы.КлиентБанк.блИмпорт "";
+
+  Import Базовый Classes Переменные;
+  Import КлиентБанк ;
+
+InClass
+
+  ExportName :String;
+  ExportName1 :String;
+  ExportName2 :String;
+  ПравилоИмп :String;
+  ЛокРекв:Record;
+
+InObject Private
+
+var Настройки :Документы.КлиентБанк.блИмпНастр;
+var Parameters:variant[];
+var Parameters1:variant[2];
+var Позиц : Integer;
+var ПозицТ : Integer;
+var ПозицА : Integer;
+
+Позиции :TemplateSection;
+var proceed[]:integer;
+var fl_onlynew:logical;
+var autoproceed:logical;
+var Videl:String;
+var dates[]:date;
+var banks[]:string;
+var rschets[]:string;
+var numb[]:integer;
+var isexist[]:integer;
+var datesel :integer;
+var bankslnk[]:string;
+var pr:logical;
+var isexistS[]:record;
+клеткаНаше   :TemplateCell = Template.CellByField["Рекв"];
+var zagr :Logical;
+var БылаДатаСписано  :Logical; -- Была ли дата списания в загружаемом файле
+var БылаДатаПоступило:Logical; -- Была ли дата поступления в загружаемом файле
+var ДатаСписания     :Date[];
+var ДатаПоступления  :Date[];
+var ДатаВыписки      :Date[];
+var Q : Query;
+-- флаги автооткрытия
+var pp_cch:logical;
+var pt_cch:logical;
+var ak_cch:logical;
+var ppp_cch:logical;
+var ka_cch:logical;
+var bs_cch:logical;
+var bv_cch:logical;
+StatusП : Integer;
+StatusО : Integer;
+аВалюта : record;     -- Валюта нашего РС
+
+Кнопка2:Button;
+
+  proc ПолеВПрограммеПриРисовании(Cell :TemplateCell; Selected :Logical;
+    var Color :Integer; var FieldColor :Integer; Font :Font);
+    if ВПрограмме<>НаНачало then
+       Color =Сис2.Константы.clRed;
+    end;
+  end;
+
+  func ПолеПравилоИмпПриВыводе(Cell :TemplateCell; Value :Variant;
+    Action :Template.OutputTypes; var Format :String) :Variant;
+    Result = Value;
+    if Action = Template.Output and Value = nil then
+      Result = BaseInfo.ProjectByName["КлиентБанкПлюс"].Folder+"Приложения\Настройки\НастройкаИмпорта.txt";
+    end;
+  end;
+
+proc шаблон_ПриОткрытии(Create: Logical);
+  var i:integer;
+  inherited шаблон_ПриОткрытии(Create);
+  Рекв = ТекущееНашеПредприятие;
+  ПолеРекв_ПриВыходе(nil, 0);
+  for i=1..Позиции.Count do
+   proceed[i]=0;
+  od;
+  Позиции.Count=nil;
+    if ПравилоИмп = nil then
+      ПравилоИмп = BaseInfo.ProjectByName["КлиентБанкПлюс"].Folder+"Приложения\Настройки\НастройкаИмпорта.txt";
+    else
+      ПравилоИмп = ПравилоИмп;
+    end;
+
+end;
+
+proc ПолеРекв_ПриВыходе(Cell :TemplateCell; Index :Integer);
+  if Cell<>nil and Index>0 then
+  -- Дополнительная обработка при изменении предприятия из клетки
+  end;
+  клеткаНаше.Enabled = (Рекв=nil or ТекущееНашеПредприятие=nil);
+end;
+
+proc Exportv(Sender :Button);
+ OpenBlank("Документы.КлиентБанк.блЭкспорт");
+end;
+
+func Fieldexportname_OnLookup(Cell :TemplateCell; Value :Variant;var NewValue :Variant) :Logical;
+ if ChooseFile(exportname, "Имя файла...", "Файлы выгрузки из Клиент-Банка(*.txt)|*.txt")=cmOK then
+    NewValue = exportname;
+ end;
+ Template.EndEdit(True);
+ Return(False);
+end;
+
+func ПолеПравилоИмп_ПриОбзоре(Cell :TemplateCell; Value :Variant;var NewValue :Variant) :Logical;
+ if ChooseFile(ПравилоИмп, "Имя файла...", "Файлы правил формирования загрузки в Клиент-Банк(*.txt)|*.txt")=cmOK then
+    Рекв=nil;
+    Proverka;
+    NewValue = ПравилоИмп;
+ end;
+ Template.EndEdit(True);
+ Return(False);
+end;
+
+proc proverka;
+  Документы.КлиентБанк.блИмпНастр.Put = ПравилоИмп;
+  Настройки = Документы.КлиентБанк.блИмпНастр.Create;
+  Parameters = Настройки.P1; --ReadFromFile;
+  Parameters1 = Настройки.P2; --ReadFromFile1;
+  позиц=parameters[6];
+  позицТ=parameters[15];
+  позицА=parameters[22];
+  ИмяРекв=parameters[13];
+
+  zagr=true;
+--  if Рекв<>nil and Рекв<>Parameters[13] and ИмяРекв<>nil then
+--     message("Внимание!!!Вы пытаетесь взять настройки др.предприятия:"+ИмяРекв.Имя);
+--     zagr=false;
+--     Template.Field = "Правило";
+--     return;
+--  elsif Рекв=nil and ИмяРекв<>nil then
+--     Рекв=имяРекв;
+----     ТекущееНашеПредприятие=Рекв;
+--  elsif ИмяРекв=nil then
+--     message("Внимание!!!Вы пытаетесь взять настройки др.предприятия:"+Parameters[14]+"!"+
+--             "В справочнике 'Контрагентов' нет контрагента:"+Parameters[14]+"!");
+--     zagr=false;
+--     return;
+--  end;
+end;
+
+func ЗаписьВКартКлиентБанк(st1:String;Обозначение: String; ИмяПоляКартотеки:String): logical;
+   var Позиция:integer;
+   var Позиция1:string;
+   if WordInString(Обозначение,st1, "=") then
+      Позиция = Pos("=", st1);
+      Позиция1 = SubStr(st1,Позиция+1,(Length(st1)-Позиция));
+      if ИмяПоляКартотеки="НомерБум" then
+        if Q.count=1 then
+           Q.current.Status=0;
+           Q.current.Номербум=Позиция1;
+        else
+           Q.next;
+           Q.current.Status=0;
+           Q.current.Номербум=Позиция1;
+        end;
+      end;
+      if ИмяПоляКартотеки="Номер" then
+        if Q.count=1 then
+           Q.current.Status=0;
+           Q.current.Номер=Позиция1;
+        else
+           Q.next;
+           Q.current.Status=0;
+           Q.current.Номер=Позиция1;
+        end;
+      end;
+      if ИмяПоляКартотеки="Дата" then
+        if Q.count=1 then
+           Q.current.Дата=StringToDate(Позиция1);
+        else
+           Q.next;
+           Q.current.Дата=StringToDate(Позиция1);
+        end;
+        InsertInArray(ДатаВыписки, 1, StringToDate(Позиция1));
+      end;
+--      if ИмяПоляКартотеки="ДатОпер" then
+--        if Q.count=1 then
+--           Q.current.ДатОпер=StringToDate(Позиция1);
+--        else
+--           Q.next;
+--           Q.current.ДатОпер=StringToDate(Позиция1);
+--        end;
+--      end;
+      if ИмяПоляКартотеки="Сумма" then
+         if Q.count=1 then
+            Q.current.Сумма=if(Parameters[29]=1,ABS(Num(Позиция1)),ABS(Num(Позиция1))) ;
+         else
+            Q.next;
+            Q.current.Сумма=if(Parameters[29]=1,ABS(Num(Позиция1)),ABS(Num(Позиция1)));
+         end;
+      end;
+      if ИмяПоляКартотеки="БАНК.РСЧЕТ" then
+         if Q.count=1 then
+            Q.current.О_РСчет=Позиция1;
+         else
+            Q.next;
+            Q.current.О_РСчет=Позиция1;
+         end;
+      end;
+      if ИмяПоляКартотеки="РЕКВ.ИНН" then
+         if Q.count=1 then
+            Q.current.О_ИНН=Позиция1;
+         else
+            Q.next;
+            Q.current.О_ИНН=Позиция1;
+         end;
+      end;
+      if ИмяПоляКартотеки="Рекв.КодПричины" then
+         if Q.count=1 then
+            Q.current.О_КПП=Позиция1;
+         else
+            Q.next;
+            Q.current.О_КПП=Позиция1;
+         end;
+      end;
+      if ИмяПоляКартотеки="РЕКВ.Имя" then
+         if Q.count=1 then
+            Q.current.О_БанкИмя=ЗаменаАпострофов(Позиция1);
+         else
+            Q.next;
+            Q.current.О_БанкИмя=ЗаменаАпострофов(Позиция1);
+         end;
+      end;
+      if ИмяПоляКартотеки="Банк.БанкИмя" then
+         if Q.count=1 then
+            Q.current.О_БанкИмя=ЗаменаАпострофов(Позиция1);
+         else
+            Q.next;
+            Q.current.О_БанкИмя=ЗаменаАпострофов(Позиция1);
+         end;
+      end;
+      if ИмяПоляКартотеки="Банк.БанкСубъекта.Имя" then
+         if Q.count=1 then
+            Q.current.О_БАНК=Позиция1;
+         else
+            Q.next;
+            Q.current.О_БАНК=Позиция1;
+         end;
+      end;
+      if ИмяПоляКартотеки="Банк.БанкСубъекта.Город" then
+         if Q.count=1 then
+            Q.current.О_ГОРОД=Позиция1;
+         else
+            Q.next;
+            Q.current.О_ГОРОД=Позиция1;
+         end;
+      end;
+      if ИмяПоляКартотеки="Банк.БанкСубъекта.БИК" then
+         if Q.count=1 then
+            Q.current.О_БИК=Позиция1;
+         else
+            Q.next;
+            Q.current.О_БИК=Позиция1;
+         end;
+      end;
+      if ИмяПоляКартотеки="Банк.БанкСубъекта.КСчет" then
+         if Q.count=1 then
+            Q.current.О_КСчет=Позиция1;
+         else
+            Q.next;
+            Q.current.О_КСчет=Позиция1;
+         end;
+      end;
+      if ИмяПоляКартотеки="БАНКП.РСЧЕТ" then
+         if Q.count=1 then
+            Q.current.П_РСчет=Позиция1;
+         else
+            Q.next;
+            Q.current.П_РСчет=Позиция1;
+         end;
+      end;
+     if ИмяПоляКартотеки="РЕКВП.ИНН" then
+        if Q.count=1 then
+           Q.current.П_ИНН=Позиция1;
+        else
+           Q.next;
+           Q.current.П_ИНН=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="РеквП.КодПричины" then
+        if Q.count=1 then
+           Q.current.П_КПП=Позиция1;
+        else
+           Q.next;
+           Q.current.П_КПП=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="БанкП.БанкИмя" then
+        if Q.count=1 then
+           Q.current.П_БанкИмя=ЗаменаАпострофов(Позиция1);
+        else
+           Q.next;
+           Q.current.П_БанкИмя=ЗаменаАпострофов(Позиция1);
+        end;
+     end;
+     if ИмяПоляКартотеки="РЕКВП.Имя" then
+        if Q.count=1 then
+           Q.current.П_БанкИмя=ЗаменаАпострофов(Позиция1);
+        else
+           Q.next;
+           Q.current.П_БанкИмя=ЗаменаАпострофов(Позиция1);
+        end;
+     end;
+     if ИмяПоляКартотеки="БанкП.БанкСубъекта.Имя" then
+        if Q.count=1 then
+           Q.current.П_Банк=Позиция1;
+        else
+           Q.next;
+           Q.current.П_Банк=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="БанкП.БанкСубъекта.Город" then
+        if Q.count=1 then
+           Q.current.П_ГОРОД=Позиция1;
+        else
+           Q.next;
+           Q.current.П_ГОРОД=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="БанкП.БанкСубъекта.БИК" then
+        if Q.count=1 then
+           Q.current.П_БИК=Позиция1;
+        else
+           Q.next;
+           Q.current.П_БИК=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="БанкП.БанкСубъекта.КСчет" then
+        if Q.count=1 then
+           Q.current.П_КСчет=Позиция1;
+        else
+           Q.next;
+           Q.current.П_КСчет=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="ВИДПЛ" then
+        if Q.count=1 then
+           Q.current.ВидПл=Позиция1;
+        else
+           Q.next;
+           Q.current.ВидПл=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="ВИДОП" then
+        if Q.count=1 then
+           Q.current.ВидОп=Позиция1;
+        else
+           Q.next;
+           Q.current.ВидОп=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="П1" then
+        if Q.count=1 then
+           Q.current.П1=Позиция1;
+        else
+           Q.next;
+           Q.current.П1=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="П2" then
+        if Q.count=1 then
+           Q.current.П2=Позиция1;
+        else
+           Q.next;
+           Q.current.П2=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="П3" then
+        if Q.count=1 then
+           Q.current.П3=Позиция1;
+        else
+           Q.next;
+           Q.current.П3=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="П4" then
+        if Q.count=1 then
+           Q.current.П4=Позиция1;
+        else
+           Q.next;
+           Q.current.П4=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="П5" then
+        if Q.count=1 then
+           Q.current.П5=Позиция1;
+        else
+           Q.next;
+           Q.current.П5=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="П6" then
+        if Q.count=1 then
+           Q.current.П6=Позиция1;
+        else
+           Q.next;
+           Q.current.П6=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="П7" then
+        if Q.count=1 then
+           Q.current.П7=Позиция1;
+        else
+           Q.next;
+           Q.current.П7=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="П8" then
+        if Q.count=1 then
+           Q.current.П8=Позиция1;
+        else
+           Q.next;
+           Q.current.П8=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="ДАТАД" then
+        if Позиция1 <> '00.00.0000':
+           if Q.count=1 then
+              Q.current.ДатаД=StringToDate(Позиция1);
+           else
+              Q.next;
+              Q.current.ДатаД=StringToDate(Позиция1);
+           end;
+        end;
+     end;
+     if ИмяПоляКартотеки="ДАТАО" then
+        if Q.count=1 then
+           Q.current.ДатаО=Позиция1;
+        else
+           Q.next;
+           Q.current.ДатаО=Позиция1;
+        end;
+     end;
+     if ИмяПоляКартотеки="Т" then
+        if Q.count=1 then
+           Q.current.Т=Позиция1;
+        else
+           Q.next;
+           Q.current.Т=Позиция1;
+        end;
+     end;
+   end;
+   if WordInString("ДатаСписано", st1, "=") then
+      Позиция = Pos("=", st1);
+      Позиция1 = SubStr(st1,Позиция+1,(Length(st1)-Позиция));
+      if Позиция1<>"" then
+         БылаДатаСписано=true;
+         if ИмяПоляКартотеки="Дата" then
+            if Q.count=1 then
+               Q.current.Дата=StringToDate(Позиция1);
+            else
+               Q.next;
+               Q.current.Дата=StringToDate(Позиция1);
+            end;
+            InsertInArray(ДатаСписания, 1, StringToDate(Позиция1));
+          end;
+      end;
+   end;
+   if WordInString("ДатаПоступило", st1, "="):
+      Позиция = Pos("=", st1);
+      Позиция1 = SubStr(st1,Позиция+1,(Length(st1)-Позиция));
+      if Позиция1<>"" then
+         БылаДатаПоступило=true;
+         if ИмяПоляКартотеки="Дата" then
+--           if Not БылаДатаСписано then
+           if Истина then
+              if Q.count=1 then
+                 Q.current.Дата=StringToDate(Позиция1);
+              else
+                 Q.next;
+                 Q.current.Дата=StringToDate(Позиция1);
+              end;
+              InsertInArray(ДатаПоступления, 1, StringToDate(Позиция1));
+           end;
+         end;
+      end;
+   end;
+end;
+
+func типдокумента(Позиция1:строка):logical;
+--     if  Позиция1 = 'Платежное поручение'
+--     или Позиция1 = 'Прочее'
+--     или Позиция1 = 'Прочие платежи'
+--     или Позиция1 = '-Прочие платежи'
+--     или Позиция1 = 'Мемориальный ордер'
+--     или Позиция1 = 'Банковский ордер'
+--     или Позиция1 = 'Платежное требование'
+--     или Позиция1 = 'Банковский ордер'
+--     или Позиция1 = 'Оплачен наличными денежный чек'
+--     или Позиция1 = 'Объявление на взнос наличными'
+--     или Позиция1 = 'Инкассовое поручение'
+--     или Позиция1 = 'Денежный чек'
+--     или Позиция1 = 'Движение по счету'
+--     или Позиция1 = 'Расходный ордер'
+--     или Позиция1 = 'Платежный Ордер' then
+     Result =истина ;
+--     иначе
+--     Result =ложь ;
+--     fi;
+
+end;
+
+ВПрограмме:Число;
+НаНачало:Число;
+Поступило:Число;
+Списано:Число;
+НаКонец:Число;
+РасчСчет:Строка;
+
+proc Import1(Sender :Button);
+  var st:string;
+  var aRecord :Record;
+  var fp2:TextFile;
+  var Позиция:integer;
+  var Позиция1:string;
+  var p,dok,i:integer;
+--  var viddoc  :logical;
+  var ДатаСписано:Date;
+    if ПравилоИмп = nil then
+      ПравилоИмп = BaseInfo.ProjectByName["КлиентБанкПлюс"].Folder+"Приложения\Настройки\НастройкаИмпорта.txt";
+    else
+      ПравилоИмп = ПравилоИмп;
+    end;
+
+  БылаДатаСписано   = false;
+  БылаДатаПоступило = false;
+  ДатаСписано = StringToDate("");
+  Документы.КлиентБанк.блТабл.date1 = today;
+  Документы.КлиентБанк.блТабл.date2 = today;
+  --Документы.КлиентБанк.блТабл.RefreshBD;
+  локрекв=рекв;
+  if exportname="" then
+     Message('Укажите имя файла для загрузки');
+     Template.Field="exportname";
+     return;
+  end;
+  proverka;
+  if zagr=true then
+    --if (EnqOkCancel("Удалить предыдущие записи из картотеки ?") = кмдВерно) :
+       Q = Query.Create([Банки.КлиентБанк]);
+       Q.Order   = "DocID";
+       --удаляем записи для текущего предприятия
+ --      Q.Filter  = "ТекРекв="+str(Рекв);
+       Q.Select;
+       while not Q.EOF do
+          Q.Current.Delete;
+       end;
+       Q.Close;
+    --end;
+--    if WordInString("txt", exportname, ".") then
+       fp2 = TextFile.Create(exportname,fmOpenRead);
+--    else
+--       fp2 = TextFile.Create(exportname+".txt",fmOpenRead);
+--    end;
+
+    dok = 0;
+    while not fp2.EOF do
+        if fp2.EOF then -- если конец, обрываем цикл
+           break;
+        end;
+       if WordInString("Номер", st, "="):
+          dok = dok + 1;
+       end;
+       st=fp2.ReadLn;
+    end;
+    fp2=nil;  --закрывает текстовый файл
+--    if WordInString("txt", exportname, ".") then
+       fp2 = TextFile.Create(exportname,fmOpenRead);
+--    else
+--       fp2 = TextFile.Create(exportname+".txt",fmOpenRead);
+--    end;
+
+    i = 0;
+    p = 0;
+    Q = Query.Create([Банки.КлиентБанк]);
+    Q.Order   = "DocID";
+    Q.Filter  = "ТекРекв="+str(Рекв);
+    Q.Select;
+    while not fp2.EOF do
+       st=fp2.ReadLn;
+       if fp2.EOF then -- если конец, обрываем цикл
+          break;
+       end;
+       if i=0 then
+          while ("СекцияДокумент" <> substr(st,1,(pos("=",st)-1))) do
+            st = fp2.ReadLn;
+             if поз("НачальныйОстаток",st)>0 then
+                НаНачало= окр(ExtractValue(st,2,"="),2);
+             еслиже поз("ВсегоПоступило",st)>0 then
+                Поступило= окр(ExtractValue(st,2,"="),2);
+             еслиже поз("ВсегоСписано",st)>0 then
+                Списано= окр(ExtractValue(st,2,"="),2);
+             еслиже поз("КонечныйОстаток",st)>0 then
+                НаКонец= окр(ExtractValue(st,2,"="),2);
+             еслиже поз("РасчСчет",st)>0 then
+                РасчСчет= ExtractValue(st,2,"=");
+                 with Query.Create([Базовый.Справочники.БанковскиеРеквизиты]) do
+                 Order   = "DocID";
+                 --удаляем записи для текущего предприятия
+                 Filter  = "РСчет='"+РасчСчет+"' и субъект.наше";
+                 Select;
+                 if Count>0 then
+--                    рекв=Current.субъект;
+                    КлиентБанк.Документы.КлиентБанк.блТабл.локрекв=Current.субъект;
+                 end;
+                end;
+             end;
+
+            if fp2.EOF then -- если конец, обрываем цикл
+               break;
+            end;
+            i = 1;
+          end;
+       end;
+--       viddoc = false;
+       if WordInString("СекцияДокумент", st, "="):
+          if Q.Count>=0 then
+             aRecord = Банки.КлиентБанк.Create;
+             Позиция = Pos("=", st);
+             Позиция1 = SubStr(st,Позиция+1,(Length(st)-Позиция));
+             if типдокумента(Позиция1) then
+                aRecord.ТипДок=0;
+                aRecord.ТекРекв=Рекв;
+                aRecord.post;
+--                viddoc = true;
+             end;
+--            if Позиция1 = 'Платежное требование' then
+--               aRecord.ТипДок=1;
+--               aRecord.ТекРекв=Рекв;
+--               aRecord.post;
+--               viddoc = true;
+--            end;
+--             if Позиция1 = 'Заявление на аккредитив':
+--                aRecord.ТипДок=2;
+--                aRecord.ТекРекв=Рекв;
+--                aRecord.post;
+--                viddoc = true;
+--             end;
+          end;
+          p=p+1;
+       end;
+
+      if типдокумента(Позиция1) then
+         for i=1..позиц do
+             ЗаписьВКартКлиентБанк(st,Parameters1[12,i],Parameters1[8,i]);
+         end;
+       end;
+--       if Позиция1 = 'Платежное требование' then
+--         for i=1..позицТ do
+--             ЗаписьВКартКлиентБанк(st,Parameters1[21,i],Parameters1[17,i]);
+--         end;
+--       end;
+       if Позиция1 = 'Заявление на аккредитив':
+         for i=1..позицА do
+             ЗаписьВКартКлиентБанк(st,Parameters1[28,i],Parameters1[24,i]);
+         end;
+       end;
+       Hint("Загружено "+Str(p)+" из "+Str(dok)+" документов");
+    end;
+    Q.Close;
+    fp2=nil;
+    if БылаДатаСписано then
+       ДатаСписано = Min(ДатаСписания);
+    elsif Not БылаДатаСписано and БылаДатаПоступило then
+       ДатаСписано = Min(ДатаПоступления);
+    elsif Not БылаДатаСписано and Not БылаДатаПоступило then
+       ДатаСписано = Min(ДатаВыписки);
+   end;
+   Q = Query.Create([Банки.КлиентБанк]);
+   Q.Order   = "DocID";
+   Q.Filter  = '(Status=0)and((РЕКВ=nil)or(БАНК=nil)or(РЕКВП=nil)or(БАНКП=nil))';
+   Q.Select;
+   while not Q.EOF do
+     if ДатаСписано>01.01.1900 then
+        if Q.current.Дата<01.01.1900 then
+           if Q.count=1 then
+              Q.current.Дата=ДатаСписано;
+           else
+              Q.current.Дата=ДатаСписано;
+           end;
+         end;
+      end;
+      Q.Next;
+   end;
+   if Q.Count>0 then
+     Документы.КлиентБанк.блТабл.date1=ДатаСписано;
+     if Документы.КлиентБанк.блТабл.date2<Документы.КлиентБанк.блТабл.date1 then
+        Документы.КлиентБанк.блТабл.date2=Документы.КлиентБанк.блТабл.date1;
+     end;
+     OpenBlank("Документы.КлиентБанк.блТабл");
+     --Документы.КлиентБанк.блТабл.RefreshBD;
+
+--    if Документы.КлиентБанк.блТабл.CreateEx(ДатаСписано, ДатаСписано, Window.ModalWindow)=cmOk then
+--       --КлиентБанк.КлиентБанк_Б.блТабл.date1=ДатаСписано;
+--       OpenBlank("КлиентБанк.КлиентБанк_Б.блТабл");
+--    end;
+
+   end;
+   Q.Close;
+   fl_onlynew=false;
+   DatesRefresh(Кнопка2);
+  end;
+  if Позиции.количество>0 then
+     ВПрограмме=окр(Остаток("Баланс:51*","СуммаБаз","Счет_в_Банке.РСчет='"+rschets[1]+"'",dates[1]),2);
+     if не ВПрограмме=НаНачало then
+       Message("Начальное сальдо не совпадает!");
+     end;
+  end;
+end;
+
+func ЗаменаАпострофов(Стр:String):String;
+  -- Заменяет апострофы кавычками
+  var позиция:Integer;
+  позиция=pos("'",Стр);
+  while позиция<>0 do
+    Стр=substr(Стр,1,позиция-1)+'"'+ substr(Стр,позиция+1,length(стр));
+    позиция=pos("'",Стр);
+  end;
+
+  return Стр;
+end;
+
+func chdate(Cell :TemplateCell; Index :Integer; Action :Template.EnterTypes) :Logical;
+  if proceed[Index]=0:
+     proceed[Index]=1;
+  else
+     proceed[Index]=0;
+  end;
+  return false;
+end;
+
+proc ДокБанк_ПриНажатии(Sender :Button);
+   var аУправляющиеПараметры :Variant[];
+   аУправляющиеПараметры[Документы.КлиентБанк.картКлиентБанк.иупЗапретить_Редактирование] = True;
+   аУправляющиеПараметры[Документы.КлиентБанк.картКлиентБанк.иупЗапретить_Удаление] = True;
+   аУправляющиеПараметры[Документы.КлиентБанк.картКлиентБанк.иупЗапретить_Добавление] = True;
+   аУправляющиеПараметры[Документы.КлиентБанк.картКлиентБанк.иупНеИспользоватьОднозначныйВыбор] = True;
+   if Документы.КлиентБанк.картКлиентБанк.ExecuteCardAdvance(,, аУправляющиеПараметры)=cmOk then
+   end;
+end;
+
+proc ПлатежДок_ПриНажатии(Sender :Button);
+  OpenBlank("Документы.КлиентБанк.блТабл");
+end;
+
+func FieldVidel_OnEnter(Cell :TemplateCell; Index :Integer;Action :Template.EnterTypes) :Logical;
+  var i,r: Integer;
+  r=Вопрос("" , "Подтвердите свой выбор:", ["Выделить","Снять выделение","Отмена"], itQuestion);
+  if r = 1 then
+     for i = 1 .. Позиции.Count do
+       proceed[i]=1;
+     end;
+  elsif  r = 2 then
+     for i = 1 .. Позиции.Count do
+       proceed[i] = 0;
+     end;
+  else
+     return false;
+  end;
+  return false;
+end;
+
+proc DatesRefresh(Sender :Button);
+  var Q1,Q2,Q3 :Query;
+  var i,k    :integer;
+  var TmpD   :date;
+  var Банк1  :integer;
+  var Банк2  :string;
+  var vБанк  :record;
+  var Рсчет1 :string;
+
+  Q1 = Query.Create([Базовый.Данные.Субъект]);
+  Q1.Order   = "DocID";
+  Q1.Filter  = 'НАШЕ=TRUE';
+  Q1.Select;
+  if Q1.EOF then
+     Message("Нет ни одного нашего контрагента. Выберите его");
+     if (Console.OpenCardfile('Справочники.картКонтрагент',,,)=cmOK) then
+     end;
+  end;
+  Q1.close;
+  Q2 = Query.Create([Банки.КлиентБанк]);
+  Q2.Order   = "DocID";
+  Q2.Filter  = '(РЕКВ<>nil)or(БАНК<>nil)or(РЕКВП<>nil)or(БАНКП<>nil)';
+  Q2.Select;
+  if Q2.EOF then
+     Message("За период " + Str(Документы.КлиентБанк.блТабл.date1) + "-" + Str(Документы.КлиентБанк.блТабл.date2) + " ничего не найдено.");
+     return;
+  end;
+  Позиции.Count=nil;
+  numb=nil;
+  dates=nil;
+  banks=nil;
+  bankslnk=nil;
+  rschets=nil;
+  for i=1..Q2.Count do
+      TmpD  =Q2.current.Дата;
+      for k=0..1 do
+         if k=0 then
+            vБанк=Q2.current.БАНК;
+            Банк1=Q2.current.БАНК.Docid;
+         else
+            vБанк=Q2.current.БАНКП;
+            Банк1=Q2.current.БАНКП.Docid;
+         end;
+         Q3 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+         Q3.Order   = "DocID";
+--         Q3.Filter  = '(Субъект='+Str(Рекв)+' and Docid='+str(Банк1)+')';
+         Q3.Filter  = '(Субъект.наше and Docid='+str(Банк1)+')';
+         Q3.Select;
+         if not Q3.EOF then
+            Банк2   =Q3.current.БанкСубъекта.Имя;
+            Рсчет1  =Q3.current.РСЧЕТ;
+            if Документы.КлиентБанк.блТабл.Status[i] <> "Документ не прошел проверку":
+               --if Q3.current.Умолчание then
+                  if fl_onlynew = false then
+                    Позиции.InsertFrame(Позиции.Count+1);
+                    ФормированиеСтрок(TmpD,Банк2,vБанк,Рсчет1);
+                  else
+                    Позиции.InsertFrame(Позиции.Count+1);
+                    TestVypisk(TmpD,vБанк);
+                    if isexist[позиции.count]=0 then
+                       ФормированиеСтрок(TmpD,Банк2,vБанк,Рсчет1);
+                    else
+                       Позиции.DeleteFrame(позиции.count); -- удаляем его
+                    end;
+                  end;
+               --end;
+            end;
+         end;
+         Q3.close;
+      end;
+      Q2.next;
+  end;
+  Q2.close;
+end;
+
+proc ФормированиеСтрок(TmpD:date;Банк2:string;vБанк:record;Рсчет1:string);
+    var newl :logical;
+    var j    :integer;
+    if позиции.count=nil then
+       numb[позиции.count]=1;
+       dates[позиции.count]=TmpD;
+       banks[позиции.count]=Банк2;
+       bankslnk[позиции.count]=str(vБанк);
+       rschets[позиции.count]=Рсчет1;
+       TestVypisk(TmpD,vБанк);
+    else
+       newl=True;
+       for j=1..позиции.count do  --данные по одному и тому же банку
+       --if (bankslnk[j]=str(vБанк)) then
+         if rschets[j]=Рсчет1 and dates[j]=TmpD then
+            newl=False;
+            Позиции.DeleteFrame(позиции.count); -- удаляем его
+            break;
+         end;
+       end;
+       if newl then
+          numb[позиции.count]=1;
+          dates[позиции.count]=TmpD;
+          banks[позиции.count]=Банк2;
+          bankslnk[позиции.count]=str(vБанк);
+          rschets[позиции.count]=Рсчет1;
+          TestVypisk(TmpD,vБанк);
+       else
+          numb[j]=numb[j]+1;
+       end;
+    end;
+end;
+
+proc TestVypisk(vTmpD:Date;vБанк1:record);
+   var Q1 :Query;
+   Q1 = Query.Create([БухУчет.Банки.Выписки]);
+   Q1.Order   = "DocID";
+   Q1.Filter  = '(ДатаПроведения='+Str(vTmpD)+') AND (БАНК='+str(vБанк1)+')';
+   Q1.Select;
+   isexist[Позиции.Count]=nil;
+   if not Q1.EOF then
+      isexist [Позиции.Count]=1;
+      isexistS[Позиции.Count]=Q1.current;
+   end;
+   Q1.Close;
+end;
+
+func Fieldisexist_OnEnter(Cell :TemplateCell; Index :Integer;Action :Template.EnterTypes) :Logical;
+  if (isexist[index]=1) then
+     OpenBlankEditor("Документы.Банки.редБанковскиеВыписки",isexistS[index]);
+  end;
+end;
+
+proc NewRecTyp(typ:integer;dir:string;Q3:Query;i:integer); --from 0-прих (мы-П) 1-расх (мы-О)
+   var Q4:Query;
+   var aRecord :Record;
+--   var tmpnum:integer;
+   var provod:logical;
+   var new:logical;   -- добавл
+   var from:integer;
+   var РЕКВП, БАНКП:Record;
+   var аБанк :record;
+   var аНомерБум,аТ:String;
+   var аДата :Date;
+   var аСумма:Numeric;
+   if (dir='П') then
+     from=1;
+     РЕКВП=Q3.current.РЕКВП;
+     БАНКП=Q3.current.БАНКП;
+   else
+     from=0;
+     РЕКВП=Q3.current.РЕКВ;
+     БАНКП=Q3.current.БАНК;
+     аБанк=Q3.current.БАНКП;
+   end;
+   new=false;
+   provod=true;
+   аДата=Q3.current.ДАТА;
+   аНомерБум=Q3.current.НОМЕРБУМ;
+   аСумма=Q3.current.СУММА;
+   аТ=Q3.current.Т;
+   if from=0 :-- ПрихПлПоручения
+      Q4 = Query.Create([Первичка.Банки.ПрихПлПоручения]);
+      Q4.Order   = "DocID";
+      Q4.Filter  = '(КОНТРБАНК='+str(БАНКП)+')and(РЕКВКОНТР='+str(РЕКВП)+')and(РЕКВБАНК='+str(аБанк)+')and(ДАТАДОК='+Str(аДата)+')and(НОМЕРБУМ="'+аНомерБум+'")and(СУММА='+str(аСумма,2)+')';
+      Q4.Select;
+      if Q4.EOF then
+         new=true;
+      end;
+      new=false;
+      if new and not autoproceed then
+         Документы.КлиентБанк.блЗапрос.Quest="Запись в картотеке приходных платежных поручений с номером "+аНомерБум+", от "
+                                              +Str(аДата)+" на сумму "+Str(аСумма,2)
+                                              +" не найдена. Создавать новую запись?";
+         OpenBlank("Документы.КлиентБанк.блЗапрос",Window.ModalWindow);
+         if Документы.КлиентБанк.блЗапрос.Result=2 then
+            provod=false;
+            new=false;
+         elsif Документы.КлиентБанк.блЗапрос.Result=3 then
+            autoproceed=True;
+         elsif Документы.КлиентБанк.блЗапрос.Result=4 then
+            provod=false;
+            new=false;
+         end;
+      end;
+      if new then
+         if not Q3.EOF then
+--            tmpnum=int(Q3.current.НомерБум)+1;
+         else
+--            tmpnum=1;
+         end;
+         aRecord = Первичка.Банки.ПрихПлПоручения.Create;
+         aRecord.Учитывать=true;
+         --aRecord.НОМЕР=tmpnum;               -- Номер, порядковый
+         aRecord.НОМЕРБУМ=аНомерБум;         -- Номер, на бумажном документе
+         aRecord.ДАТАДОК=аДата;              -- Дата, указанная на самом документе
+         aRecord.ВАЛЮТА=аВалюта;                   -- валюта документа
+         aRecord.РЕКВ=РЕКВ;                  -- Наши реквизиты
+         aRecord.РЕКВБАНК=аБАНК;             -- Наши банковские реквизиты
+         aRecord.РЕКВКОНТР=РЕКВП;            -- Реквизиты (отправителя)
+         aRecord.КОНТРБАНК=БАНКП;            -- банковские реквизиты (отправителя)
+         aRecord.СУММА=abs(аСумма);               -- Сумма платежа
+         aRecord.НАЗНАЧПЛАТ=аТ;              -- назначение платежа
+         aRecord.post;
+         if not autoproceed then
+            OpenBlankEditor('Документы.Банки.редПриходноеПлатежноеПоручение',aRecord,Window.ModalWindow);
+         end;
+         ppp_cch=True;
+      end;
+      if provod then
+         StatusП=2;
+         Q3.current.Status=if(БАНКПнаш,3*StatusП+StatusО,8);
+      end;
+      Q4.close;
+   end;
+end;
+
+var БАНКПнаш :logical;
+
+proc БанкВыписка_ПриНажатии(Sender :Button);
+  var Q1,Q2 :Query;
+  var i:integer;
+  var Index :Integer;
+  var Status      : Integer;
+  var tmpR: string;
+  var ds,ds3:string;
+  var локВыписки :БухУчет.Документы.Банки.редБанковскиеВыписки;
+
+  for i=1..Позиции.Count do
+    if proceed[i]=1:
+       Q1 = Query.Create([Банки.КлиентБанк]);
+       Q1.Order   = "DocID";
+--       Q1.Filter  = '(РЕКВ<>nil)and(РЕКВП<>nil)and(ДАТА='+Str(dates[i])+')and((БАНК='+bankslnk[i]+')or(БАНКП='+bankslnk[i]+'))';
+       Q1.Filter  = '(ДАТА='+Str(dates[i])+')and((БАНК='+bankslnk[i]+')or(БАНКП='+bankslnk[i]+'))';
+       --Q1.Filter  = '(РЕКВ<>nil)and(БАНК<>nil)and(РЕКВП<>nil)and(БАНКП<>nil)and(ДАТА='+Str(dates[i])+')and((БАНК='+bankslnk[i]+')or(БАНКП='+bankslnk[i]+'))';
+       Q1.Select;
+       локВыписки = БухУчет.Документы.Банки.редБанковскиеВыписки.BlankFormCreateEx;
+       while not Q1.EOF do
+          TmpR=str(Q1.current.БАНК);
+          If TmpR=bankslnk[i] then                -- Это расход (совпадает с нашим)
+             ds='П';ds3='П';
+          else                                       -- Это приход
+             ds='О';ds3='';
+          end;
+          NewRecTyp(Q1.current.ТипДок,ds3,Q1,i);
+          Status   =Q1.current.Status;
+          StatusО  =Status-3*Int(Trunc(Status/3));     -- от имени О (остаток)
+          StatusП  =Int(Trunc(Status/3));              -- от имени П (частное)
+          if fl_onlynew = false then
+             if StatusП=0 and TmpR=str(Q1.current.БАНКП) then
+                ds='О';ds3='';
+             end;
+          end;
+          Q2 = Query.Create([Базовый.Справочники.БанковскиеРеквизиты]);
+          Q2.Order   = "DocID";
+          Q2.Filter  = 'РСчет="'+rschets[i]+'"';
+          Q2.Select;
+          if not Q2.EOF then
+             БанкПНАШ=Q2.current.Умолчание;
+             аВалюта =Q2.current.ВАЛЮТА;
+             --x_БИК   =GetFieldS(MRObl,1,"БИК"  );
+             --x_КСЧЕТ =GetFieldS(MRObl,1,"КСЧЕТ");
+          end;
+          Q2.close;
+          if Q1.current.ТипДок=0 then   --  платежное поручение
+             локВыписки.Record.ДатаПроведения = Q1.current.ДАТА;
+             локВыписки.Record.ВАЛ  = аВалюта;
+             if ds='П' then
+                if StatusО=0 then
+                   Q1.current.Status=if(БАНКПнаш,3*StatusП+1,4);
+                end;
+                локВыписки.Record.Рекв = Рекв;
+                локВыписки.Record.Банк = Q1.current.Банк;
+                if локВыписки.Record.Рекв=nil then
+                локВыписки.Record.рекв = Q1.current.Банк.субъект;
+                end;
+                index=локВыписки.Record.ПозицииКре.Add;
+                локВыписки.Record.ПозицииКре[index].НОМЕРБУМ=Q1.current.НОМЕРБУМ;
+                локВыписки.Record.ПозицииКре[index].СУММА   =Q1.current.СУММА;
+                локВыписки.Record.ПозицииКре[index].КодОп   =Q1.current.КС;
+                локВыписки.Record.ПозицииКре[index].ДатаДокумента = Q1.Current.Дата;
+
+                if локВыписки.Record.ПозицииКре[index].КодОп   ="" then
+                    локВыписки.Record.ПозицииКре[index].КодОп   ="60";
+                end;
+
+                локВыписки.Record.ПозицииКре[index].Т       =Q1.current.Т;
+                if Q1.current.РЕКВП=nil then
+                локВыписки.Record.ПозицииКре[index].РЕКВП   =Q1.current.банкп.субъект;
+                 иначе
+                локВыписки.Record.ПозицииКре[index].РЕКВП   =Q1.current.РЕКВП;
+                end;
+                локВыписки.Record.ПозицииКре[index].Проводить=True;
+--                 if локВыписки.Record.ПозицииКре[index].РЕКВП.Наше then
+--                   локВыписки.Record.ПозицииКре[index].КодОп="57";
+--                 end;
+
+              else
+                if StatusП=0 then
+                   Q1.current.Status=if(БАНКПнаш,StatusО+3,4);
+                end;
+                локВыписки.Record.Рекв = Рекв;
+                локВыписки.Record.Банк = Q1.current.БанкП;
+                index=локВыписки.Record.ПозицииДеб.Add;
+                локВыписки.Record.ПозицииДеб[index].НОМЕРБУМ=Q1.current.НОМЕРБУМ;
+                локВыписки.Record.ПозицииДеб[index].СУММА   =Q1.current.СУММА;
+                локВыписки.Record.ПозицииДеб[index].КодОп   =Q1.current.КСП;
+                локВыписки.Record.ПозициидЕБ[index].ДатаДокумента = Q1.Current.Дата;
+                if локВыписки.Record.ПозицииДеб[index].КодОп   ="" then
+                    локВыписки.Record.ПозицииДеб[index].КодОп   ="62";
+                end;
+                локВыписки.Record.ПозицииДеб[index].Т       =Q1.current.Т;
+                локВыписки.Record.ПозицииДеб[index].РЕКВП   =Q1.current.РЕКВ;
+--                 if локВыписки.Record.ПозицииДеб[index].РЕКВП.Наше then
+--                   локВыписки.Record.ПозицииДеб[index].КодОп="57";
+--                 end;
+                локВыписки.Record.ПозицииДеб[index].Проводить=True;
+             end; -- Расход/Приход
+          end;
+          Q1.Next;
+       end;
+       локВыписки.ОбработкаДокументаПриСоздании;
+       if локВыписки.ShowEx(локВыписки.Record, Window.ModalWindow)=cmOk then
+       end;
+       Q1.close;
+     end;
+   end;
+   if autoproceed then
+      --не понятно для чего это сделано
+        if (Console.OpenCardfile('Документы.Банки.картПриходныеПлатежныеПоручения',,,)=cmOK) then
+        end;
+        if (Console.OpenCardfile('Документы.Банки.картБанковскиеВыписки',,,)=cmOK) then
+        end;
+  end;
+  for i = 1..Позиции.Count do
+    if proceed[i]=0 then
+       pr = true;
+    else
+       return;
+    end;
+  end;
+  if pr = true then
+    Message('Выберите,пожалуйста,документ');
+  end;
+end;
+
+  proc Button1OnClick(Sender :Button);
+       exportname=exportname1;
+       Import1(nil);
+
+  end;
+
+  proc Button11OnClick(Sender :Button);
+       exportname=exportname2;
+       Import1(nil);
+      
+  end;
+
+  func кнПерейтиНаСайт(Cell :TemplateCell; Action :Template.ClickTypes) :Logical;
+     ExecuteProgram("http://www.turboflyerp.ru/");
+     
+    Result = True; -- Разрешаем стандартную обработку
+  end;
+
+end
